@@ -13,6 +13,7 @@ contract PolicyRegistry {
 
     address public owner;
     address public authorizedConsumer;
+    address public authorizedRegistrar;
 
     mapping(bytes32 => Policy) private policies;
 
@@ -22,6 +23,7 @@ contract PolicyRegistry {
 
     error Unauthorized();
     error InvalidConsumer();
+    error InvalidRegistrar();
     error PolicyAlreadyConsumed();
     error PolicyNotFound();
     error PolicyExpired();
@@ -41,6 +43,7 @@ contract PolicyRegistry {
     );
 
     event AuthorizedConsumerUpdated(address indexed oldConsumer, address indexed newConsumer);
+    event AuthorizedRegistrarUpdated(address indexed oldRegistrar, address indexed newRegistrar);
 
     modifier onlyOwner() {
         if (msg.sender != owner) {
@@ -51,6 +54,13 @@ contract PolicyRegistry {
 
     modifier onlyAuthorizedConsumer() {
         if (msg.sender != authorizedConsumer) {
+            revert Unauthorized();
+        }
+        _;
+    }
+
+    modifier onlyAuthorizedRegistrar() {
+        if (msg.sender != authorizedRegistrar) {
             revert Unauthorized();
         }
         _;
@@ -72,6 +82,15 @@ contract PolicyRegistry {
         emit AuthorizedConsumerUpdated(oldConsumer, consumer);
     }
 
+    function setAuthorizedRegistrar(address registrar) external onlyOwner {
+        if (registrar == address(0)) revert InvalidRegistrar();
+
+        address oldRegistrar = authorizedRegistrar;
+        authorizedRegistrar = registrar;
+
+        emit AuthorizedRegistrarUpdated(oldRegistrar, registrar);
+    }
+
     function registerPolicy(
         bytes32 poolId,
         address trader,
@@ -79,7 +98,7 @@ contract PolicyRegistry {
         uint256 expiry,
         uint256 maxLoss,
         uint256 maxFee
-    ) external returns (bytes32 policyId) {
+    ) external onlyAuthorizedRegistrar returns (bytes32 policyId) {
         if (poolId == bytes32(0)) {
             revert InvalidPool();
         }

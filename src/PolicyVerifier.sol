@@ -12,10 +12,14 @@ contract PolicyVerifier is EIP712 {
         uint256 expiry;
         uint256 maxLoss;
         uint256 maxFee;
+        bool zeroForOne;
+        int256 amountSpecified;
+        uint160 sqrtPriceLimitX96;
     }
 
-    bytes32 public constant POLICY_TYPEHASH =
-        keccak256("Policy(bytes32 poolId,address trader,uint256 nonce,uint256 expiry,uint256 maxLoss,uint256 maxFee)");
+    bytes32 public constant POLICY_TYPEHASH = keccak256(
+        "Policy(bytes32 poolId,address trader,uint256 nonce,uint256 expiry,uint256 maxLoss,uint256 maxFee,bool zeroForOne,int256 amountSpecified,uint160 sqrtPriceLimitX96)"
+    );
 
     address public owner;
     address public authorizedSigner;
@@ -58,7 +62,10 @@ contract PolicyVerifier is EIP712 {
                 policy.nonce,
                 policy.expiry,
                 policy.maxLoss,
-                policy.maxFee
+                policy.maxFee,
+                policy.zeroForOne,
+                policy.amountSpecified,
+                policy.sqrtPriceLimitX96
             )
         );
 

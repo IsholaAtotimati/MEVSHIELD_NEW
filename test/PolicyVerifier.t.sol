@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {console2} from "forge-std/console2.sol";
 import {PolicyVerifier} from "../src/PolicyVerifier.sol";
 
 contract PolicyVerifierTest is Test {
@@ -29,8 +30,18 @@ contract PolicyVerifierTest is Test {
             nonce: 1,
             expiry: block.timestamp + 1 hours,
             maxLoss: 100,
-            maxFee: 5
+            maxFee: 5,
+            zeroForOne: true,
+            amountSpecified: -100e6,
+            sqrtPriceLimitX96: 79228162514264337593543950336
         });
+    }
+
+    function test_PrintEIP712CompatibilityValues() public {
+        console2.log("Verifier:", address(verifier));
+        console2.log("Chain ID:", block.chainid);
+        console2.log("Expiry:", policy.expiry);
+        console2.logBytes32(verifier.hashPolicy(policy));
     }
 
     function _signPolicy(PolicyVerifier.Policy memory p, uint256 privateKey)

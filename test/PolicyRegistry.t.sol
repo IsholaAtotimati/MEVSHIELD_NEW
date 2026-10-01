@@ -23,6 +23,8 @@ contract PolicyRegistryTest is Test {
     function setUp() public {
         registry = new PolicyRegistry();
 
+        registry.setAuthorizedRegistrar(address(this));
+
         expiry = block.timestamp + 1 days;
     }
 
@@ -78,6 +80,16 @@ contract PolicyRegistryTest is Test {
     // ------------------------------------------------------------
     // Nonce uniqueness
     // ------------------------------------------------------------
+
+    function test_ThreatModel_UnauthorizedAddressCannotGriefTraderNonce() public {
+        vm.prank(attacker);
+
+        vm.expectRevert(PolicyRegistry.Unauthorized.selector);
+
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+
+        assertFalse(registry.isRegistered(trader, nonce));
+    }
 
     function test_RevertWhenNonceAlreadyRegistered() public {
         registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
@@ -202,5 +214,48 @@ contract PolicyRegistryTest is Test {
         vm.expectRevert(PolicyRegistry.PolicyExpired.selector);
 
         registry.consumePolicy(policyId);
+    }
+
+    function test_RevertWhenNonOwnerSetsRegistrar() public {
+        attacker = makeAddr("attacker");
+        address newRegistrar = makeAddr("newRegistrar");
+
+        vm.prank(attacker);
+
+        vm.expectRevert(PolicyRegistry.Unauthorized.selector);
+
+        registry.setAuthorizedRegistrar(newRegistrar);
+    }
+
+    function test_RevertWhenRegistrarIsZero() public {
+        vm.expectRevert(PolicyRegistry.InvalidRegistrar.selector);
+
+        registry.setAuthorizedRegistrar(address(0));
+    }
+
+    function test_ChangingRegistrarRevokesOldRegistrar() public {
+        address oldRegistrar = address(this);
+        address newRegistrar = makeAddr("newRegistrar");
+
+        registry.setAuthorizedRegistrar(newRegistrar);
+
+        vm.prank(oldRegistrar);
+
+        vm.expectRevert(PolicyRegistry.Unauthorized.selector);
+
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+    }
+
+    function test_NewRegistrarCanRegisterAfterRotation() public {
+        address newRegistrar = makeAddr("newRegistrar");
+
+        registry.setAuthorizedRegistrar(newRegistrar);
+
+        vm.prank(newRegistrar);
+
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+
+        assertTrue(policyId != bytes32(0));
+        assertTrue(registry.isRegistered(trader, nonce));
     }
 }
