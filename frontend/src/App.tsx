@@ -21,17 +21,17 @@ import {
 
 import "./App.css";
 
-const BACKEND_URL = "http://172.31.232.216:4000";
+const BACKEND_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
 const SWAP_CONFIG = {
   poolId:
-    "0x78c301af0739931f33c28593d8cd95ad6cf558c42308d2d9da7ff370c4c11995",
+    "0x75eeb1ab079f55178bbe93102539d5d3cab08ab019b0bb1e05a8d6cc4d5002d8",
 
   currency0:
-    "0x09635F643e140090A9A8Dcd712eD6285858ceBef" as Address,
+    "0x3722a74BD678c358c9cbE47F43400C97C9cDb1D0" as Address,
 
   currency1:
-    "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F" as Address,
+    "0x83029461d33A575A2AD852BE69a0BB0aDC68988e" as Address,
 
   fee: 3000,
 
@@ -47,10 +47,10 @@ const SWAP_CONFIG = {
   sqrtPriceLimitX96: "4295128740",
 
   trader:
-    "0xe0dB54929b9409D93b49a92914618EDA8437cA8b" as Address,
+    CONTRACTS.mevShieldRouter as Address,
 
   recipient:
-    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" as Address,
+    "0x016B78a30CE176EF0B90c122e8677e13aAB2A815" as Address,
 };
 
 type DeploymentStatus = {
@@ -198,7 +198,7 @@ function App() {
     } catch (error) {
       console.error(error);
       setStatus(
-        "Could not connect to Anvil. Make sure Anvil is running on port 8545.",
+        "Could not connect to Sepolia. Check your RPC connection.",
       );
     }
   }

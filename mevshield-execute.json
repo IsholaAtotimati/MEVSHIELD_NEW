@@ -1,0 +1,29 @@
+{
+  "policy": {
+    "poolId": "0x75eeb1ab079f55178bbe93102539d5d3cab08ab019b0bb1e05a8d6cc4d5002d8",
+    "trader": "0xE57525678cbf6417F685727b77551316a3De3bba",
+    "nonce": "1",
+    "expiry": "1790926180",
+    "maxLoss": "200000",
+    "maxFee": "20000",
+    "zeroForOne": true,
+    "amountSpecified": "-100000000",
+    "sqrtPriceLimitX96": "4295128740"
+  },
+  "signature": "0x345e427e96c22eb3c0faf964778c7e241e40f0d09626815389b5c037ce2340f31f12119d94798b78ed974c94a21cfb0782d75d79228fec9486bfd4b24d381c341c",
+  "actualLoss": "100000",
+  "actualFee": "10000",
+  "poolKey": {
+    "currency0": "0x3722a74BD678c358c9cbE47F43400C97C9cDb1D0",
+    "currency1": "0x83029461d33A575A2AD852BE69a0BB0aDC68988e",
+    "fee": 3000,
+    "tickSpacing": 60,
+    "hooks": "0xd8aE178f4C5a17daF7f32b3648e0Ac42f50DC080"
+  },
+  "swapParams": {
+    "zeroForOne": true,
+    "amountSpecified": "-100000000",
+    "sqrtPriceLimitX96": "4295128740"
+  },
+  "recipient": "0x016B78a30CE176EF0B90c122e8677e13aAB2A815"
+}

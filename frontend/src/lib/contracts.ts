@@ -1,24 +1,36 @@
-export const CHAIN_ID = 31337;
+export const CHAIN_ID = 11155111;
 
-export const ANVIL_CHAIN = {
-  id: 31337,
-  name: "Anvil",
+export const SEPOLIA_CHAIN = {
+  id: 11155111,
+  name: "Sepolia",
   nativeCurrency: {
-    name: "Ether",
+    name: "Sepolia Ether",
     symbol: "ETH",
     decimals: 18,
   },
   rpcUrls: {
     default: {
-      http: ["http://127.0.0.1:8545"],
+      http: ["https://ethereum-sepolia-rpc.publicnode.com"],
     },
   },
 } as const;
 
 export const CONTRACTS = {
-  poolManager: "0xF71F05eEe4D20d1E34805F89821CcE9A488b24bc",
-  policyRegistry: "0xC662A0f4a422D5042d183DD0A53D164092Eb8b92",
-  policyVerifier: "0xEd9D66b038e33989404D72F88c7220Ee395CBC9e",
-  policyAuthorization: "0x57d1e2F2a638813824BB2A63Da5B78B891382940",
-  mevShieldHook: "0x8ba326a0b7a7fE8b37152fA6F4DED83dAB630080",
+  poolManager:
+    "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
+
+  policyRegistry:
+    "0xC57DE7312B9e90f29bAdE0d1944f6A73f5FC7365",
+
+  policyVerifier:
+    "0x9DF6c29bD323B61f83f1D3214041bf08f1267544",
+
+  policyAuthorization:
+    "0x0Ebb15276f230130DD238fa1581d4379488111f5",
+
+  mevShieldHook:
+    "0xd8aE178f4C5a17daF7f32b3648e0Ac42f50DC080",
+
+  mevShieldRouter:
+    "0xE57525678cbf6417F685727b77551316a3De3bba",
 } as const;

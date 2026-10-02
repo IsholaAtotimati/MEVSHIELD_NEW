@@ -5,20 +5,24 @@ import {
   http,
 } from "viem";
 
-import { ANVIL_CHAIN } from "./contracts";
+import { SEPOLIA_CHAIN } from "./contracts";
 
 export const publicClient = createPublicClient({
-  chain: ANVIL_CHAIN,
-  transport: http("http://127.0.0.1:8545"),
+  chain: SEPOLIA_CHAIN,
+  transport: http(
+    "https://ethereum-sepolia-rpc.publicnode.com",
+  ),
 });
 
 export function getWalletClient() {
   if (!window.ethereum) {
-    throw new Error("MetaMask or another injected wallet is required.");
+    throw new Error(
+      "MetaMask or another injected wallet is required.",
+    );
   }
 
   return createWalletClient({
-    chain: ANVIL_CHAIN,
+    chain: SEPOLIA_CHAIN,
     transport: custom(window.ethereum),
   });
 }

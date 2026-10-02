@@ -38,11 +38,18 @@ export function calculateRisk(input: SwapRiskInput): RiskResult {
   const maxLoss = actualLoss * 2n;
   const maxFee = actualFee * 2n;
 
+  // Current MVP loss model is fixed at 0.1% of absolute trade size.
+  // Risk thresholds are expressed as loss in basis points.
+  const lossBps =
+    absoluteAmount === 0n
+      ? 0n
+      : (actualLoss * 10_000n) / absoluteAmount;
+
   let riskLevel: RiskResult["riskLevel"];
 
-  if (actualLoss <= absoluteAmount / 1000n) {
+  if (lossBps <= 10n) {
     riskLevel = "LOW";
-  } else if (actualLoss <= absoluteAmount / 500n) {
+  } else if (lossBps <= 50n) {
     riskLevel = "MEDIUM";
   } else {
     riskLevel = "HIGH";
