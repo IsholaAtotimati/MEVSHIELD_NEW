@@ -14,9 +14,7 @@ import {MEVShieldHook} from "../src/MEVShieldHook.sol";
 import {MEVShieldRouter} from "../src/MEVShieldRouter.sol";
 
 contract DeploySepolia is Script {
-    // DEPLOYER_PRIVATE_KEY must be provided through the environment.
-
-    uint256 internal constant SIGNER_PRIVATE_KEY = 0xA11CE;
+    // DEPLOYER_PRIVATE_KEY and SIGNER_PRIVATE_KEY must be provided through the environment.
 
     struct DeploymentInfo {
         address manager;
@@ -32,9 +30,10 @@ contract DeploySepolia is Script {
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 signerKey = vm.envUint("SIGNER_PRIVATE_KEY");
 
         address deployer = vm.addr(deployerKey);
-        address signer = vm.addr(SIGNER_PRIVATE_KEY);
+        address signer = vm.addr(signerKey);
 
         console2.log("Deployer:", deployer);
         console2.log("Signer:", signer);
