@@ -24,6 +24,11 @@ import {
   getWalletClient,
   publicClient,
 } from "./lib/viem";
+import {
+  createRequestId,
+  logFrontend,
+  safeError,
+} from "./lib/observability";
 
 import "./App.css";
 
@@ -83,6 +88,7 @@ type PolicyResponse = {
   riskLevel: string;
   signature: string;
   policyId: string;
+  requestId: string;
   txHash?: Hex;
   registered?: boolean;
 };
@@ -121,6 +127,7 @@ function App() {
     useState<string>("No policy loaded.");
 
   const [policy, setPolicy] = useState<PolicyResponse | null>(null);
+  const [policyRequestId, setPolicyRequestId] = useState("");
   const [execution, setExecution] =
     useState<ExecutionResponse | null>(null);
 
@@ -266,12 +273,77 @@ function App() {
     }
   }
 
+  async function reportTransactionEvent(
+    requestId: string,
+    event:
+      | "policy_registration_submitted"
+      | "policy_registration_failed"
+      | "swap_submitted"
+      | "swap_failed",
+    details: {
+      txHash?: Hex;
+      nonce?: string;
+      error?: unknown;
+    } = {},
+  ) {
+    const failure = details.error
+      ? safeError(details.error)
+      : undefined;
+
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/observability/transaction`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-request-id": requestId,
+          },
+          body: JSON.stringify({
+            event,
+            txHash: details.txHash,
+            chainId: CHAIN_ID,
+            contract:
+              event.startsWith("policy_registration")
+                ? CONTRACTS.policyAuthorization
+                : undefined,
+            router: event.startsWith("swap_")
+              ? CONTRACTS.mevShieldRouter
+              : undefined,
+            nonce: details.nonce,
+            ...failure,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Backend rejected transaction telemetry (${response.status}).`,
+        );
+      }
+    } catch (error) {
+      logFrontend("telemetry_delivery_failed", {
+        requestId,
+        event,
+        ...safeError(error),
+      });
+    }
+  }
+
   async function createPolicy() {
     setIsCreatingPolicy(true);
     setExecution(null);
     setPolicy(null);
+    const requestId = createRequestId();
+    setPolicyRequestId(requestId);
+    logFrontend("swap_started", {
+      requestId,
+      trader: SWAP_CONFIG.trader,
+      amount: SWAP_CONFIG.amountSpecified,
+    });
     setActionStatus("Calculating risk and requesting policy...");
 
+    let registrationTxHash: Hex | undefined;
     try {
       const walletClient = getWalletClient();
       const [connectedAccount] = await walletClient.requestAddresses();
@@ -331,6 +403,7 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-request-id": requestId,
         },
         body: JSON.stringify({
           poolId: SWAP_CONFIG.poolId,
@@ -345,6 +418,16 @@ function App() {
       });
 
       const data = await response.json();
+      const responseRequestId =
+        response.headers.get("x-request-id") ?? requestId;
+      const result = data as PolicyResponse;
+      logFrontend("policy_response", {
+        requestId,
+        httpStatus: response.status,
+        nonce: result?.policy?.nonce,
+        policyHash: result?.policyId,
+        riskLevel: result?.riskLevel,
+      });
 
       if (!response.ok) {
         throw new Error(
@@ -352,11 +435,14 @@ function App() {
         );
       }
 
-      const result = data as PolicyResponse;
+      if (responseRequestId !== requestId) {
+        throw new Error("Backend request ID did not match this swap.");
+      }
+      result.requestId = requestId;
 
       setActionStatus("Approve the policy registration in your wallet...");
 
-      const txHash = await walletClient.writeContract({
+      registrationTxHash = await walletClient.writeContract({
         address: CONTRACTS.policyAuthorization,
         abi: policyAuthorizationAbi,
         functionName: "registerPolicy",
@@ -376,9 +462,32 @@ function App() {
         ],
         account: connectedAccount,
       });
+      logFrontend("transaction_submitted", {
+        requestId,
+        txHash: registrationTxHash,
+        transactionType: "policy_registration",
+      });
+      await reportTransactionEvent(requestId, "policy_registration_submitted", {
+        txHash: registrationTxHash,
+        nonce: result.policy.nonce,
+      });
 
       setActionStatus("Waiting for policy registration confirmation...");
-      await publicClient.waitForTransactionReceipt({ hash: txHash });
+      const registrationReceipt =
+        await publicClient.waitForTransactionReceipt({
+          hash: registrationTxHash,
+        });
+      logFrontend("transaction_confirmed", {
+        requestId,
+        txHash: registrationTxHash,
+        blockNumber: registrationReceipt.blockNumber.toString(),
+        status: registrationReceipt.status,
+        gasUsed: registrationReceipt.gasUsed.toString(),
+        transactionType: "policy_registration",
+      });
+      if (registrationReceipt.status !== "success") {
+        throw new Error("Policy registration transaction failed.");
+      }
 
       const registered = await publicClient.readContract({
         address: CONTRACTS.policyRegistry,
@@ -391,12 +500,28 @@ function App() {
         throw new Error("Policy registration was not confirmed on-chain.");
       }
 
-      setPolicy({ ...result, txHash, registered });
+      setPolicy({
+        ...result,
+        requestId,
+        txHash: registrationTxHash,
+        registered,
+      });
       setPolicyId(result.policyId as Hex);
 
       setActionStatus("Policy signed and registered on-chain.");
     } catch (error) {
       console.error(error);
+      logFrontend("transaction_failed", {
+        requestId,
+        txHash: registrationTxHash,
+        ...safeError(error),
+        transactionType: "policy_registration",
+      });
+      await reportTransactionEvent(
+        requestId,
+        "policy_registration_failed",
+        { txHash: registrationTxHash, error },
+      );
 
       setActionStatus(
         error instanceof Error
@@ -416,6 +541,13 @@ function App() {
       return;
     }
 
+    const requestId = policy.requestId || policyRequestId;
+    logFrontend("protected_swap_execution_started", {
+      requestId,
+      trader: SWAP_CONFIG.trader,
+      amount: SWAP_CONFIG.amountSpecified,
+      policyHash: policy.policyId,
+    });
     setIsExecuting(true);
     setExecution(null);
     setActionStatus("Executing protected swap...");
@@ -462,6 +594,11 @@ function App() {
           args: [CONTRACTS.mevShieldRouter, amountIn],
           account: payer,
         });
+        logFrontend("transaction_submitted", {
+          requestId,
+          txHash: approvalHash,
+          transactionType: "token_approval",
+        });
         const approvalReceipt =
           await publicClient.waitForTransactionReceipt({
             hash: approvalHash,
@@ -469,6 +606,14 @@ function App() {
         if (approvalReceipt.status !== "success") {
           throw new Error("Input-token approval transaction failed.");
         }
+        logFrontend("transaction_confirmed", {
+          requestId,
+          txHash: approvalHash,
+          blockNumber: approvalReceipt.blockNumber.toString(),
+          status: approvalReceipt.status,
+          gasUsed: approvalReceipt.gasUsed.toString(),
+          transactionType: "token_approval",
+        });
       }
 
       const hookData = encodeAbiParameters(
@@ -551,6 +696,15 @@ function App() {
         gas: gasLimit,
         account: payer,
       });
+      logFrontend("transaction_submitted", {
+        requestId,
+        txHash,
+        transactionType: "protected_swap",
+      });
+      await reportTransactionEvent(requestId, "swap_submitted", {
+        txHash,
+        nonce: policy.policy.nonce,
+      });
 
       setActionStatus("Waiting for swap confirmation...");
       const receipt = await publicClient.waitForTransactionReceipt({
@@ -559,6 +713,14 @@ function App() {
       if (receipt.status !== "success") {
         throw new Error("Protected swap transaction failed.");
       }
+      logFrontend("transaction_confirmed", {
+        requestId,
+        txHash,
+        blockNumber: receipt.blockNumber.toString(),
+        status: receipt.status,
+        gasUsed: receipt.gasUsed.toString(),
+        transactionType: "protected_swap",
+      });
 
       const result: ExecutionResponse = {
         txHash,
@@ -584,6 +746,15 @@ function App() {
       setBalance(formatEther(balanceResult));
     } catch (error) {
       console.error(error);
+      logFrontend("transaction_failed", {
+        requestId,
+        ...safeError(error),
+        transactionType: "protected_swap",
+      });
+      await reportTransactionEvent(requestId, "swap_failed", {
+        error,
+        nonce: policy.policy.nonce,
+      });
 
       setActionStatus(
         error instanceof Error
@@ -889,7 +1060,17 @@ function App() {
 
               <div>
                 <span>Registration TX</span>
-                <code>{policy.txHash ?? "Not registered"}</code>
+                {policy.txHash ? (
+                  <a
+                    href={`https://sepolia.etherscan.io/tx/${policy.txHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    View on Sepolia Etherscan
+                  </a>
+                ) : (
+                  <code>Not registered</code>
+                )}
               </div>
 
               <div>
@@ -958,7 +1139,13 @@ function App() {
 
             <div className="tx-row">
               <span>Transaction</span>
-              <code>{execution.txHash}</code>
+              <a
+                href={`https://sepolia.etherscan.io/tx/${execution.txHash}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View on Sepolia Etherscan
+              </a>
             </div>
 
             <div className="tx-row">

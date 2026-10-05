@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx --test src/risk/riskEngine.test.ts src/observability/requestCorrelation.test.ts",
     "dev": "tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js"
