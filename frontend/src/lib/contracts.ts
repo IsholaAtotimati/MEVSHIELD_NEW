@@ -28,8 +28,11 @@ export const CONTRACTS = {
   policyAuthorization:
     "0x415fde3E9a373f2c482a90dB069ccf4A2d215304",
 
+  poolAuthorization:
+    "0x0Ebb15276f230130DD238fa1581d4379488111f5",
+
   mevShieldHook:
-    "0x9Db919582f4751d3d0Fc8C38D15a717da9E54080",
+    "0xd8aE178f4C5a17daF7f32b3648e0Ac42f50DC080",
 
   mevShieldRouter:
     "0xE57525678cbf6417F685727b77551316a3De3bba",

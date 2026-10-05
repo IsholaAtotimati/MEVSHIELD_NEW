@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Address, Hex } from "viem";
-import { encodeAbiParameters, formatEther } from "viem";
+import {
+  encodeAbiParameters,
+  formatEther,
+  keccak256,
+} from "viem";
 
 import {
   CONTRACTS,
@@ -56,6 +60,8 @@ type DeploymentStatus = {
   poolManager: Address | null;
   authorization: Address | null;
   registry: Address | null;
+  registryOwner: Address | null;
+  authorizedConsumer: Address | null;
   verifier: Address | null;
   authorizedSigner: Address | null;
 };
@@ -104,6 +110,8 @@ function App() {
     poolManager: null,
     authorization: null,
     registry: null,
+    registryOwner: null,
+    authorizedConsumer: null,
     verifier: null,
     authorizedSigner: null,
   });
@@ -150,6 +158,8 @@ function App() {
         poolManager,
         authorization,
         registry,
+        registryOwner,
+        authorizedConsumer,
         verifier,
         authorizedSigner,
       ] = await Promise.all([
@@ -172,6 +182,18 @@ function App() {
         }),
 
         publicClient.readContract({
+          address: CONTRACTS.policyRegistry,
+          abi: policyRegistryAbi,
+          functionName: "owner",
+        }),
+
+        publicClient.readContract({
+          address: CONTRACTS.policyRegistry,
+          abi: policyRegistryAbi,
+          functionName: "authorizedConsumer",
+        }),
+
+        publicClient.readContract({
           address: CONTRACTS.policyAuthorization,
           abi: policyAuthorizationAbi,
           functionName: "verifier",
@@ -188,6 +210,8 @@ function App() {
         poolManager,
         authorization,
         registry,
+        registryOwner,
+        authorizedConsumer,
         verifier,
         authorizedSigner,
       });
@@ -197,6 +221,47 @@ function App() {
       console.error(error);
       setStatus(
         "Could not connect to Sepolia. Check your RPC connection.",
+      );
+    }
+  }
+
+  async function restoreExistingPoolPath() {
+    setActionStatus("Confirm the pool compatibility update in your owner wallet...");
+
+    try {
+      const walletClient = getWalletClient();
+      const [owner] = await walletClient.requestAddresses();
+
+      if (!owner || owner.toLowerCase() !== deployment.registryOwner?.toLowerCase()) {
+        throw new Error("Connect the PolicyRegistry owner wallet to update this setting.");
+      }
+
+      if (await walletClient.getChainId() !== CHAIN_ID) {
+        await walletClient.switchChain({ id: CHAIN_ID });
+      }
+
+      const hash = await walletClient.writeContract({
+        address: CONTRACTS.policyRegistry,
+        abi: policyRegistryAbi,
+        functionName: "setAuthorizedConsumer",
+        args: [CONTRACTS.poolAuthorization],
+        account: owner,
+      });
+
+      setActionStatus("Waiting for pool compatibility update...");
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error("Pool compatibility update failed on-chain.");
+      }
+
+      await loadProtocol();
+      setActionStatus("Existing liquid pool restored. Wallet-paid swaps are enabled.");
+    } catch (error) {
+      console.error(error);
+      setActionStatus(
+        error instanceof Error
+          ? error.message
+          : "Could not restore the existing pool path.",
       );
     }
   }
@@ -216,6 +281,44 @@ function App() {
       }
 
       setAccount(connectedAccount);
+
+      const poolIdFromKey = keccak256(
+        encodeAbiParameters(
+          [
+            {
+              type: "tuple",
+              components: [
+                { name: "currency0", type: "address" },
+                { name: "currency1", type: "address" },
+                { name: "fee", type: "uint24" },
+                { name: "tickSpacing", type: "int24" },
+                { name: "hooks", type: "address" },
+              ],
+            },
+          ],
+          [{
+            currency0: SWAP_CONFIG.currency0,
+            currency1: SWAP_CONFIG.currency1,
+            fee: SWAP_CONFIG.fee,
+            tickSpacing: SWAP_CONFIG.tickSpacing,
+            hooks: SWAP_CONFIG.hooks,
+          }],
+        ),
+      );
+      if (poolIdFromKey !== SWAP_CONFIG.poolId) {
+        throw new Error(
+          "Configured pool ID does not match the pool key and hook. Swap stopped to avoid a failing, high-gas transaction.",
+        );
+      }
+
+      if (
+        deployment.authorizedConsumer?.toLowerCase() !==
+        deployment.authorization?.toLowerCase()
+      ) {
+        throw new Error(
+          "The existing pool authorization is not enabled. Use Restore Existing Pool Path before checking swap risk.",
+        );
+      }
 
       if (await walletClient.getChainId() !== CHAIN_ID) {
         await walletClient.switchChain({ id: CHAIN_ID });
@@ -409,30 +512,43 @@ function App() {
       );
 
       setActionStatus(
-        "Confirm the protected swap in your wallet; your wallet pays gas.",
+        "Estimating the protected swap before requesting wallet confirmation...",
+      );
+      const swapArgs = [
+        {
+          currency0: SWAP_CONFIG.currency0,
+          currency1: SWAP_CONFIG.currency1,
+          fee: SWAP_CONFIG.fee,
+          tickSpacing: SWAP_CONFIG.tickSpacing,
+          hooks: SWAP_CONFIG.hooks,
+        },
+        {
+          zeroForOne: SWAP_CONFIG.zeroForOne,
+          amountSpecified,
+          sqrtPriceLimitX96: BigInt(
+            SWAP_CONFIG.sqrtPriceLimitX96,
+          ),
+        },
+        hookData,
+        payer,
+      ] as const;
+      const estimatedGas = await publicClient.estimateContractGas({
+        address: CONTRACTS.mevShieldRouter,
+        abi: mevShieldRouterAbi,
+        functionName: "executeSwap",
+        args: swapArgs,
+        account: payer,
+      });
+      const gasLimit = estimatedGas + estimatedGas / 5n;
+      setActionStatus(
+        `Estimated swap gas: ${estimatedGas.toLocaleString()}. Confirm in your wallet; your wallet pays gas.`,
       );
       const txHash = await walletClient.writeContract({
         address: CONTRACTS.mevShieldRouter,
         abi: mevShieldRouterAbi,
         functionName: "executeSwap",
-        args: [
-          {
-            currency0: SWAP_CONFIG.currency0,
-            currency1: SWAP_CONFIG.currency1,
-            fee: SWAP_CONFIG.fee,
-            tickSpacing: SWAP_CONFIG.tickSpacing,
-            hooks: SWAP_CONFIG.hooks,
-          },
-          {
-            zeroForOne: SWAP_CONFIG.zeroForOne,
-            amountSpecified,
-            sqrtPriceLimitX96: BigInt(
-              SWAP_CONFIG.sqrtPriceLimitX96,
-            ),
-          },
-          hookData,
-          payer,
-        ],
+        args: swapArgs,
+        gas: gasLimit,
         account: payer,
       });
 
@@ -683,6 +799,29 @@ function App() {
           </div>
         </div>
 
+        {deployment.authorization &&
+          deployment.authorizedConsumer &&
+          deployment.authorization.toLowerCase() !==
+            deployment.authorizedConsumer.toLowerCase() && (
+            <div className="policy-result">
+              The live pool uses its original hook authorization. The registry currently points to a different consumer, so swap estimation would fail.
+              {account?.toLowerCase() ===
+              deployment.registryOwner?.toLowerCase() ? (
+                <button
+                  className="primary"
+                  onClick={restoreExistingPoolPath}
+                  disabled={isCreatingPolicy || isExecuting}
+                >
+                  Restore Existing Pool Path
+                </button>
+              ) : (
+                <p className="warning">
+                  Connect the registry owner wallet ({shortAddress(deployment.registryOwner)}) to restore the existing pool.
+                </p>
+              )}
+            </div>
+          )}
+
         <button
           className="primary"
           onClick={createPolicy}
@@ -766,6 +905,8 @@ function App() {
               onClick={executeProtectedSwap}
               disabled={
                 !policy.registered ||
+                deployment.authorization?.toLowerCase() !==
+                  deployment.authorizedConsumer?.toLowerCase() ||
                 isExecuting
               }
             >

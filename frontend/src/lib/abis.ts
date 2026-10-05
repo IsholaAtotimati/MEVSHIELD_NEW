@@ -1,6 +1,27 @@
 export const policyRegistryAbi = [
   {
     type: "function",
+    name: "owner",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "authorizedConsumer",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "setAuthorizedConsumer",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "consumer", type: "address" }],
+    outputs: [],
+  },
+  {
+    type: "function",
     name: "getPolicy",
     stateMutability: "view",
     inputs: [
