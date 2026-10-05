@@ -7,7 +7,6 @@ import {
 } from "ethers";
 
 const REGISTRY_ABI = [
-  "function registerPolicy(bytes32 poolId,address trader,uint256 nonce,uint256 expiry,uint256 maxLoss,uint256 maxFee) external",
   "function getPolicy(bytes32 policyId) external view returns (tuple(bytes32 poolId,address trader,uint256 nonce,uint256 expiry,uint256 maxLoss,uint256 maxFee))",
   "function isRegistered(address trader,uint256 nonce) external view returns (bool)",
   "function isConsumed(address trader,uint256 nonce) external view returns (bool)",
@@ -82,32 +81,6 @@ export class MEVShieldClient {
     );
 
     return keccak256(encoded);
-  }
-
-  async registerPolicy(
-    poolId: string,
-    trader: string,
-    nonce: bigint,
-    expiry: bigint,
-    maxLoss: bigint,
-    maxFee: bigint
-  ): Promise<string> {
-    const tx = await this.registry.registerPolicy(
-      poolId,
-      trader,
-      nonce,
-      expiry,
-      maxLoss,
-      maxFee
-    );
-
-    const receipt = await tx.wait();
-
-    if (!receipt) {
-      throw new Error("Policy registration transaction was not mined");
-    }
-
-    return receipt.hash;
   }
 
   async executeSwap(

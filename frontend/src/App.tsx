@@ -78,8 +78,8 @@ type PolicyResponse = {
   riskLevel: string;
   signature: string;
   policyId: string;
-  txHash: string;
-  registered: boolean;
+  txHash?: Hex;
+  registered?: boolean;
 };
 
 type ExecutionResponse = {
@@ -210,6 +210,19 @@ function App() {
     setActionStatus("Calculating risk and requesting policy...");
 
     try {
+      const walletClient = getWalletClient();
+      const [connectedAccount] = await walletClient.requestAddresses();
+
+      if (!connectedAccount) {
+        throw new Error("Connect a wallet to register the policy.");
+      }
+
+      setAccount(connectedAccount);
+
+      if (await walletClient.getChainId() !== CHAIN_ID) {
+        await walletClient.switchChain({ id: CHAIN_ID });
+      }
+
       const expiry =
         Math.floor(Date.now() / 1000) + 3600;
 
@@ -240,14 +253,47 @@ function App() {
 
       const result = data as PolicyResponse;
 
-      setPolicy(result);
+      setActionStatus("Approve the policy registration in your wallet...");
+
+      const txHash = await walletClient.writeContract({
+        address: CONTRACTS.policyAuthorization,
+        abi: policyAuthorizationAbi,
+        functionName: "registerPolicy",
+        args: [
+          {
+            poolId: result.policy.poolId as Hex,
+            trader: result.policy.trader as Address,
+            nonce: BigInt(result.policy.nonce),
+            expiry: BigInt(result.policy.expiry),
+            maxLoss: BigInt(result.policy.maxLoss),
+            maxFee: BigInt(result.policy.maxFee),
+            zeroForOne: result.policy.zeroForOne,
+            amountSpecified: BigInt(result.policy.amountSpecified),
+            sqrtPriceLimitX96: BigInt(result.policy.sqrtPriceLimitX96),
+          },
+          result.signature as Hex,
+        ],
+        account: connectedAccount,
+      });
+
+      setActionStatus("Waiting for policy registration confirmation...");
+      await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+      const registered = await publicClient.readContract({
+        address: CONTRACTS.policyRegistry,
+        abi: policyRegistryAbi,
+        functionName: "isRegistered",
+        args: [result.policy.trader as Address, BigInt(result.policy.nonce)],
+      });
+
+      if (!registered) {
+        throw new Error("Policy registration was not confirmed on-chain.");
+      }
+
+      setPolicy({ ...result, txHash, registered });
       setPolicyId(result.policyId as Hex);
 
-      setActionStatus(
-        result.registered
-          ? "Policy signed and registered on-chain."
-          : "Policy created but not registered.",
-      );
+      setActionStatus("Policy signed and registered on-chain.");
     } catch (error) {
       console.error(error);
 
@@ -619,7 +665,7 @@ function App() {
 
               <div>
                 <span>Registration TX</span>
-                <code>{policy.txHash}</code>
+                <code>{policy.txHash ?? "Not registered"}</code>
               </div>
 
               <div>

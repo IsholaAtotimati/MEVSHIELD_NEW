@@ -15,6 +15,17 @@ contract PolicyAuthorization {
         verifier = PolicyVerifier(verifier_);
     }
 
+    function registerPolicy(PolicyVerifier.Policy calldata policy, bytes calldata signature)
+        external
+        returns (bytes32 policyId)
+    {
+        verifier.verifyPolicy(policy, signature);
+
+        return registry.registerPolicy(
+            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee
+        );
+    }
+
     function authorize(PolicyVerifier.Policy calldata policy, bytes calldata signature)
         external
         returns (bytes32 policyId)

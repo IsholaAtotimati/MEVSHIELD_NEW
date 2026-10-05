@@ -65,6 +65,30 @@ export const policyVerifierAbi = [
 export const policyAuthorizationAbi = [
   {
     type: "function",
+    name: "registerPolicy",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "policy",
+        type: "tuple",
+        components: [
+          { name: "poolId", type: "bytes32" },
+          { name: "trader", type: "address" },
+          { name: "nonce", type: "uint256" },
+          { name: "expiry", type: "uint256" },
+          { name: "maxLoss", type: "uint256" },
+          { name: "maxFee", type: "uint256" },
+          { name: "zeroForOne", type: "bool" },
+          { name: "amountSpecified", type: "int256" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [{ name: "policyId", type: "bytes32" }],
+  },
+  {
+    type: "function",
     name: "registry",
     stateMutability: "view",
     inputs: [],

@@ -1,6 +1,5 @@
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, } from "ethers";
 const REGISTRY_ABI = [
-    "function registerPolicy(bytes32 poolId,address trader,uint256 nonce,uint256 expiry,uint256 maxLoss,uint256 maxFee) external",
     "function getPolicy(bytes32 policyId) external view returns (tuple(bytes32 poolId,address trader,uint256 nonce,uint256 expiry,uint256 maxLoss,uint256 maxFee))",
     "function isRegistered(address trader,uint256 nonce) external view returns (bool)",
     "function isConsumed(address trader,uint256 nonce) external view returns (bool)",
@@ -35,14 +34,6 @@ export class MEVShieldClient {
     static policyId(poolId, trader, nonce) {
         const encoded = AbiCoder.defaultAbiCoder().encode(["bytes32", "address", "uint256"], [poolId, trader, nonce]);
         return keccak256(encoded);
-    }
-    async registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee) {
-        const tx = await this.registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
-        const receipt = await tx.wait();
-        if (!receipt) {
-            throw new Error("Policy registration transaction was not mined");
-        }
-        return receipt.hash;
     }
     async executeSwap(poolKey, swapParams, hookData, recipient) {
         const tx = await this.router.executeSwap([

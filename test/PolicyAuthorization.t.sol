@@ -86,6 +86,28 @@ contract PolicyAuthorizationTest is Test {
         assertTrue(registry.isConsumed(policy.trader, policy.nonce));
     }
 
+    function test_UserCanRegisterValidSignedPolicy() public {
+        registry.setAuthorizedRegistrar(address(authorization));
+        bytes memory signature = _signPolicy(policy);
+
+        vm.prank(attacker);
+        bytes32 policyId = authorization.registerPolicy(policy, signature);
+
+        assertEq(policyId, _policyId(policy));
+        assertTrue(registry.isRegistered(policy.trader, policy.nonce));
+    }
+
+    function test_RegisterPolicyRejectsInvalidSignature() public {
+        registry.setAuthorizedRegistrar(address(authorization));
+        bytes memory signature = _signPolicy(policy);
+        signature[0] = bytes1(uint8(signature[0]) ^ 1);
+
+        vm.expectRevert();
+        authorization.registerPolicy(policy, signature);
+
+        assertFalse(registry.isRegistered(policy.trader, policy.nonce));
+    }
+
     function test_RevertWhenValidSignatureButWrongRegistryPolicy() public {
         _registerPolicy(policy);
 

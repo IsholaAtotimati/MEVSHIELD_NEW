@@ -82,8 +82,6 @@ app.post("/policy", async (req, res) => {
             verifyingContract: VERIFIER_ADDRESS
         });
         const policyId = MEVShieldClient.policyId(result.policy.poolId, result.policy.trader, result.policy.nonce);
-        const txHash = await chainClient.registerPolicy(result.policy.poolId, result.policy.trader, result.policy.nonce, result.policy.expiry, result.policy.maxLoss, result.policy.maxFee);
-        const registered = await chainClient.isRegistered(result.policy.trader, result.policy.nonce);
         res.json({
             policy: {
                 ...result.policy,
@@ -98,9 +96,7 @@ app.post("/policy", async (req, res) => {
             actualFee: result.actualFee.toString(),
             riskLevel: result.riskLevel,
             signature,
-            policyId,
-            txHash,
-            registered
+            policyId
         });
     }
     catch (error) {

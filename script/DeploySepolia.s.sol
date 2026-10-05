@@ -52,7 +52,7 @@ contract DeploySepolia is Script {
         info.authorization = address(new PolicyAuthorization(info.registry, info.verifier));
 
         PolicyVerifier(info.verifier).setAuthorizedSigner(signer);
-        PolicyRegistry(info.registry).setAuthorizedRegistrar(deployer);
+        PolicyRegistry(info.registry).setAuthorizedRegistrar(info.authorization);
         PolicyRegistry(info.registry).setAuthorizedConsumer(info.authorization);
 
         (info.hook, info.salt) = _deployHook(info.manager, info.authorization);
@@ -146,7 +146,7 @@ contract DeploySepolia is Script {
         console2.log("MEVShieldHook:", info.hook);
         console2.log("MEVShieldRouter:", info.router);
         console2.log("AuthorizedSigner:", info.signer);
-        console2.log("AuthorizedRegistrar:", info.deployer);
+        console2.log("AuthorizedRegistrar:", info.authorization);
         console2.log("AuthorizedConsumer:", info.authorization);
         console2.log("CREATE2 Salt:");
         console2.logBytes32(info.salt);
