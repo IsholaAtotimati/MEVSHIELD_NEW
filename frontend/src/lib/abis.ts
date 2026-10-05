@@ -107,6 +107,62 @@ export const policyAuthorizationAbi = [
   },
 ] as const;
 
+export const mevShieldRouterAbi = [
+  {
+    type: "function",
+    name: "executeSwap",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "key",
+        type: "tuple",
+        components: [
+          { name: "currency0", type: "address" },
+          { name: "currency1", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "hooks", type: "address" },
+        ],
+      },
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "zeroForOne", type: "bool" },
+          { name: "amountSpecified", type: "int256" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+      { name: "hookData", type: "bytes" },
+      { name: "recipient", type: "address" },
+    ],
+    outputs: [{ name: "delta", type: "int256" }],
+  },
+] as const;
+
+export const erc20Abi = [
+  {
+    type: "function",
+    name: "allowance",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
 export const mevShieldHookAbi = [
   {
     type: "function",

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Address, Hex } from "viem";
-import { formatEther } from "viem";
+import { encodeAbiParameters, formatEther } from "viem";
 
 import {
   CONTRACTS,
@@ -8,6 +8,8 @@ import {
 } from "./lib/contracts";
 
 import {
+  erc20Abi,
+  mevShieldRouterAbi,
   mevShieldHookAbi,
   policyAuthorizationAbi,
   policyRegistryAbi,
@@ -48,9 +50,6 @@ const SWAP_CONFIG = {
 
   trader:
     CONTRACTS.mevShieldRouter as Address,
-
-  recipient:
-    "0x016B78a30CE176EF0B90c122e8677e13aAB2A815" as Address,
 };
 
 type DeploymentStatus = {
@@ -83,8 +82,7 @@ type PolicyResponse = {
 };
 
 type ExecutionResponse = {
-  success: boolean;
-  txHash: string;
+  txHash: Hex;
   blockNumber: number;
   policyId: string;
   payer: string;
@@ -320,68 +318,154 @@ function App() {
     setActionStatus("Executing protected swap...");
 
     try {
-      const response = await fetch(
-        `${BACKEND_URL}/execute-swap`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            policy: policy.policy,
-
-            signature: policy.signature,
-
-            actualLoss: policy.actualLoss,
-
-            actualFee: policy.actualFee,
-
-            poolKey: {
-              currency0: SWAP_CONFIG.currency0,
-              currency1: SWAP_CONFIG.currency1,
-              fee: SWAP_CONFIG.fee,
-              tickSpacing: SWAP_CONFIG.tickSpacing,
-              hooks: SWAP_CONFIG.hooks,
-            },
-
-            swapParams: {
-              zeroForOne:
-                SWAP_CONFIG.zeroForOne,
-
-              amountSpecified:
-                SWAP_CONFIG.amountSpecified,
-
-              sqrtPriceLimitX96:
-                SWAP_CONFIG.sqrtPriceLimitX96,
-            },
-
-            recipient:
-              SWAP_CONFIG.recipient,
-          }),
-        },
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error ??
-            data?.details ??
-            "Protected swap failed",
-        );
+      const walletClient = getWalletClient();
+      const [payer] = await walletClient.requestAddresses();
+      if (!payer) {
+        throw new Error("Connect a wallet before executing the swap.");
       }
 
-      const result = data as ExecutionResponse;
+      if (await walletClient.getChainId() !== CHAIN_ID) {
+        await walletClient.switchChain({ id: CHAIN_ID });
+      }
+
+      setAccount(payer);
+
+      const amountSpecified = BigInt(SWAP_CONFIG.amountSpecified);
+      if (amountSpecified >= 0n) {
+        throw new Error(
+          "Wallet-paid swaps currently require a negative exact-input amount.",
+        );
+      }
+      const amountIn = -amountSpecified;
+      const inputToken = SWAP_CONFIG.zeroForOne
+        ? SWAP_CONFIG.currency0
+        : SWAP_CONFIG.currency1;
+
+      const allowance = await publicClient.readContract({
+        address: inputToken,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [payer, CONTRACTS.mevShieldRouter],
+      });
+
+      if (allowance < amountIn) {
+        setActionStatus(
+          "Approve the input token in your wallet; you pay the approval gas.",
+        );
+        const approvalHash = await walletClient.writeContract({
+          address: inputToken,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [CONTRACTS.mevShieldRouter, amountIn],
+          account: payer,
+        });
+        const approvalReceipt =
+          await publicClient.waitForTransactionReceipt({
+            hash: approvalHash,
+          });
+        if (approvalReceipt.status !== "success") {
+          throw new Error("Input-token approval transaction failed.");
+        }
+      }
+
+      const hookData = encodeAbiParameters(
+        [
+          {
+            type: "tuple",
+            components: [
+              { name: "poolId", type: "bytes32" },
+              { name: "trader", type: "address" },
+              { name: "nonce", type: "uint256" },
+              { name: "expiry", type: "uint256" },
+              { name: "maxLoss", type: "uint256" },
+              { name: "maxFee", type: "uint256" },
+              { name: "zeroForOne", type: "bool" },
+              { name: "amountSpecified", type: "int256" },
+              { name: "sqrtPriceLimitX96", type: "uint160" },
+            ],
+          },
+          { type: "bytes" },
+          { type: "uint256" },
+          { type: "uint256" },
+        ],
+        [
+          {
+            poolId: policy.policy.poolId as Hex,
+            trader: policy.policy.trader as Address,
+            nonce: BigInt(policy.policy.nonce),
+            expiry: BigInt(policy.policy.expiry),
+            maxLoss: BigInt(policy.policy.maxLoss),
+            maxFee: BigInt(policy.policy.maxFee),
+            zeroForOne: policy.policy.zeroForOne,
+            amountSpecified: BigInt(policy.policy.amountSpecified),
+            sqrtPriceLimitX96: BigInt(
+              policy.policy.sqrtPriceLimitX96,
+            ),
+          },
+          policy.signature as Hex,
+          BigInt(policy.actualLoss),
+          BigInt(policy.actualFee),
+        ],
+      );
+
+      setActionStatus(
+        "Confirm the protected swap in your wallet; your wallet pays gas.",
+      );
+      const txHash = await walletClient.writeContract({
+        address: CONTRACTS.mevShieldRouter,
+        abi: mevShieldRouterAbi,
+        functionName: "executeSwap",
+        args: [
+          {
+            currency0: SWAP_CONFIG.currency0,
+            currency1: SWAP_CONFIG.currency1,
+            fee: SWAP_CONFIG.fee,
+            tickSpacing: SWAP_CONFIG.tickSpacing,
+            hooks: SWAP_CONFIG.hooks,
+          },
+          {
+            zeroForOne: SWAP_CONFIG.zeroForOne,
+            amountSpecified,
+            sqrtPriceLimitX96: BigInt(
+              SWAP_CONFIG.sqrtPriceLimitX96,
+            ),
+          },
+          hookData,
+          payer,
+        ],
+        account: payer,
+      });
+
+      setActionStatus("Waiting for swap confirmation...");
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash: txHash,
+      });
+      if (receipt.status !== "success") {
+        throw new Error("Protected swap transaction failed.");
+      }
+
+      const result: ExecutionResponse = {
+        txHash,
+        blockNumber: Number(receipt.blockNumber),
+        policyId: policy.policyId,
+        payer,
+        router: CONTRACTS.mevShieldRouter,
+        recipient: payer,
+      };
 
       setExecution(result);
 
       setActionStatus(
-        "Protected swap executed successfully.",
+        "Protected swap executed successfully; your wallet paid the transaction gas.",
       );
 
       await loadPolicyById(
         result.policyId as Hex,
       );
+      const balanceResult = await publicClient.getBalance({
+        address: payer,
+      });
+      setBalance(formatEther(balanceResult));
     } catch (error) {
       console.error(error);
 
@@ -563,14 +647,15 @@ function App() {
             <h2>Protected Swap</h2>
 
             <p className="muted">
-              Calculate the off-chain risk, receive an
-              EIP-712 policy, register it on-chain, then
-              execute through the MEVShield hook.
+              The backend calculates risk and signs the
+              policy. Your connected wallet registers it,
+              approves the input token if needed, and pays
+              gas for the protected swap.
             </p>
           </div>
 
           <span className="live-badge">
-            LIVE BACKEND
+            WALLET-PAID EXECUTION
           </span>
         </div>
 
@@ -715,6 +800,11 @@ function App() {
                 value={shortAddress(
                   execution.router,
                 )}
+              />
+
+              <Metric
+                label="Gas payer"
+                value={shortAddress(execution.payer)}
               />
 
               <Metric
