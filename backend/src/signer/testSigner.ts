@@ -33,8 +33,8 @@ const policy: Policy = {
 
   amountSpecified: -100000000n,
 
-  sqrtPriceLimitX96:
-    79228162514264337593543950336n
+  sqrtPriceLimitX96: 79228162514264337593543950336n,
+  minAmountOut: 1n,
 };
 
 // Solidity:
@@ -68,7 +68,8 @@ const types = {
     { name: "maxFee", type: "uint256" },
     { name: "zeroForOne", type: "bool" },
     { name: "amountSpecified", type: "int256" },
-    { name: "sqrtPriceLimitX96", type: "uint160" }
+    { name: "sqrtPriceLimitX96", type: "uint160" },
+    { name: "minAmountOut", type: "uint256" }
   ]
 };
 
@@ -90,7 +91,8 @@ const digest = TypedDataEncoder.hash(
     maxFee: policy.maxFee,
     zeroForOne: policy.zeroForOne,
     amountSpecified: policy.amountSpecified,
-    sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+    sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+    minAmountOut: policy.minAmountOut
   }
 );
 
@@ -106,7 +108,8 @@ const recovered = verifyTypedData(
     maxFee: policy.maxFee,
     zeroForOne: policy.zeroForOne,
     amountSpecified: policy.amountSpecified,
-    sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+    sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+    minAmountOut: policy.minAmountOut
   },
   signature
 );

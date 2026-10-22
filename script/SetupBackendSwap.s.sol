@@ -48,11 +48,9 @@ contract SetupBackendSwap is Script {
         // 1. Deploy fresh test tokens.
         // ------------------------------------------------------------
 
-        MockERC20 tokenA =
-            new MockERC20("MEVShield Backend Token A", "MBA", 18);
+        MockERC20 tokenA = new MockERC20("MEVShield Backend Token A", "MBA", 18);
 
-        MockERC20 tokenB =
-            new MockERC20("MEVShield Backend Token B", "MBB", 18);
+        MockERC20 tokenB = new MockERC20("MEVShield Backend Token B", "MBB", 18);
 
         // Give the backend deployer enough tokens to:
         // - provide liquidity
@@ -100,10 +98,7 @@ contract SetupBackendSwap is Script {
         // 3. Initialize the pool.
         // ------------------------------------------------------------
 
-        manager.initialize(
-            key,
-            79228162514264337593543950336
-        );
+        manager.initialize(key, 79228162514264337593543950336);
 
         console2.log("Pool initialized.");
 
@@ -111,32 +106,17 @@ contract SetupBackendSwap is Script {
         // 4. Add liquidity.
         // ------------------------------------------------------------
 
-        PoolModifyLiquidityTest liquidityRouter =
-            new PoolModifyLiquidityTest(manager);
+        PoolModifyLiquidityTest liquidityRouter = new PoolModifyLiquidityTest(manager);
 
-        tokenA.approve(
-            address(liquidityRouter),
-            type(uint256).max
-        );
+        tokenA.approve(address(liquidityRouter), type(uint256).max);
 
-        tokenB.approve(
-            address(liquidityRouter),
-            type(uint256).max
-        );
+        tokenB.approve(address(liquidityRouter), type(uint256).max);
 
-        IPoolManager.ModifyLiquidityParams memory liquidityParams =
-            IPoolManager.ModifyLiquidityParams({
-                tickLower: -120,
-                tickUpper: 120,
-                liquidityDelta: int256(LIQUIDITY),
-                salt: bytes32(0)
-            });
+        IPoolManager.ModifyLiquidityParams memory liquidityParams = IPoolManager.ModifyLiquidityParams({
+            tickLower: -120, tickUpper: 120, liquidityDelta: int256(LIQUIDITY), salt: bytes32(0)
+        });
 
-        liquidityRouter.modifyLiquidity(
-            key,
-            liquidityParams,
-            bytes("")
-        );
+        liquidityRouter.modifyLiquidity(key, liquidityParams, bytes(""));
 
         console2.log("Liquidity added.");
 
@@ -146,15 +126,9 @@ contract SetupBackendSwap is Script {
         // The backend deployer will be payer during /execute-swap.
         // ------------------------------------------------------------
 
-        tokenA.approve(
-            routerAddress,
-            type(uint256).max
-        );
+        tokenA.approve(routerAddress, type(uint256).max);
 
-        tokenB.approve(
-            routerAddress,
-            type(uint256).max
-        );
+        tokenB.approve(routerAddress, type(uint256).max);
 
         console2.log("Router approvals set.");
 

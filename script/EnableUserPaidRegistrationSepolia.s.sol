@@ -32,6 +32,7 @@ contract EnableUserPaidRegistrationSepolia is Script {
 
         PolicyAuthorization authorization = new PolicyAuthorization(address(registry), address(verifier));
         address hook = _deployHook(POOL_MANAGER, address(authorization));
+        authorization.setAuthorizedHook(hook);
 
         registry.setAuthorizedRegistrar(address(authorization));
         registry.setAuthorizedConsumer(address(authorization));

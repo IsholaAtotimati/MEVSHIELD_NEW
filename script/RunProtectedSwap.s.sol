@@ -55,6 +55,7 @@ contract RunProtectedSwap is Script {
         bool zeroForOne;
         int256 amountSpecified;
         uint160 sqrtPriceLimitX96;
+        uint256 minAmountOut;
     }
 
     function run() external {
@@ -201,7 +202,8 @@ contract RunProtectedSwap is Script {
             maxFee: 5000,
             zeroForOne: true,
             amountSpecified: -int256(SWAP_AMOUNT),
-            sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            sqrtPriceLimitX96: MIN_PRICE_LIMIT,
+            minAmountOut: 1
         });
 
         console2.log("");
@@ -216,7 +218,13 @@ contract RunProtectedSwap is Script {
         // ------------------------------------------------------------
 
         bytes32 policyId = registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         console2.log("");
@@ -238,7 +246,8 @@ contract RunProtectedSwap is Script {
             maxFee: policy.maxFee,
             zeroForOne: policy.zeroForOne,
             amountSpecified: policy.amountSpecified,
-            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+            minAmountOut: policy.minAmountOut
         });
 
         bytes32 digest = verifier.hashPolicy(verifierPolicy);

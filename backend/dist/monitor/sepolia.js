@@ -4,7 +4,7 @@ import { clearPolicyRequest, requestIdForPolicy, } from "../observability/reques
 const CHAIN_ID = 11155111;
 const POLL_INTERVAL_MS = 12_000;
 const registryInterface = new Interface([
-    "event PolicyRegistered(bytes32 indexed policyId, bytes32 indexed poolId, address indexed trader, uint256 nonce, uint256 expiry, uint256 maxLoss, uint256 maxFee)",
+    "event PolicyRegistered(bytes32 indexed policyId, bytes32 indexed poolId, address indexed trader, uint256 nonce, uint256 expiry, uint256 maxLoss, uint256 maxFee, uint256 minAmountOut)",
 ]);
 const hookInterface = new Interface([
     "event SwapPolicyEnforced(bytes32 indexed poolId, address indexed trader, uint256 nonce, uint256 maxLoss, uint256 maxFee)",
@@ -105,6 +105,7 @@ export function startSepoliaMonitor() {
                     expiry: String(args.expiry),
                     maxLoss: String(args.maxLoss),
                     maxFee: String(args.maxFee),
+                    minAmountOut: String(args.minAmountOut),
                 }
                 : {
                     maxLoss: String(args.maxLoss),

@@ -19,6 +19,7 @@ contract PolicyRegistryTest is Test {
 
     uint256 maxLoss = 100e6;
     uint256 maxFee = 10e6;
+    uint256 minAmountOut = 1;
 
     function setUp() public {
         registry = new PolicyRegistry();
@@ -33,7 +34,7 @@ contract PolicyRegistryTest is Test {
     // ------------------------------------------------------------
 
     function test_RegisterPolicy() public {
-        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         PolicyRegistry.Policy memory policy = registry.getPolicy(policyId);
 
@@ -43,12 +44,13 @@ contract PolicyRegistryTest is Test {
         assertEq(policy.expiry, expiry);
         assertEq(policy.maxLoss, maxLoss);
         assertEq(policy.maxFee, maxFee);
+        assertEq(policy.minAmountOut, minAmountOut);
     }
 
     function test_PolicyIdIsDeterministic() public {
         bytes32 expectedPolicyId = keccak256(abi.encode(poolId, trader, nonce));
 
-        bytes32 actualPolicyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 actualPolicyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         assertEq(actualPolicyId, expectedPolicyId);
     }
@@ -60,13 +62,13 @@ contract PolicyRegistryTest is Test {
     function test_RevertWhenPoolIsZero() public {
         vm.expectRevert(PolicyRegistry.InvalidPool.selector);
 
-        registry.registerPolicy(bytes32(0), trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(bytes32(0), trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
     }
 
     function test_RevertWhenTraderIsZero() public {
         vm.expectRevert(PolicyRegistry.InvalidTrader.selector);
 
-        registry.registerPolicy(poolId, address(0), nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, address(0), nonce, expiry, maxLoss, maxFee, minAmountOut);
     }
 
     function test_RevertWhenPolicyIsExpired() public {
@@ -74,7 +76,7 @@ contract PolicyRegistryTest is Test {
 
         vm.expectRevert(PolicyRegistry.InvalidExpiry.selector);
 
-        registry.registerPolicy(poolId, trader, nonce, block.timestamp, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, block.timestamp, maxLoss, maxFee, minAmountOut);
     }
 
     // ------------------------------------------------------------
@@ -86,23 +88,23 @@ contract PolicyRegistryTest is Test {
 
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
 
-        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         assertFalse(registry.isRegistered(trader, nonce));
     }
 
     function test_RevertWhenNonceAlreadyRegistered() public {
-        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         vm.expectRevert(PolicyRegistry.NonceAlreadyRegistered.selector);
 
-        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
     }
 
     function test_DifferentTradersCanUseSameNonce() public {
-        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
-        bytes32 policyId = registry.registerPolicy(poolId, traderTwo, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, traderTwo, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         PolicyRegistry.Policy memory policy = registry.getPolicy(policyId);
 
@@ -117,7 +119,7 @@ contract PolicyRegistryTest is Test {
     function test_IsRegistered() public {
         assertFalse(registry.isRegistered(trader, nonce));
 
-        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         assertTrue(registry.isRegistered(trader, nonce));
     }
@@ -147,7 +149,7 @@ contract PolicyRegistryTest is Test {
     }
 
     function test_RevertWhenUnauthorizedAddressConsumesPolicy() public {
-        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         vm.prank(attacker);
 
@@ -163,7 +165,7 @@ contract PolicyRegistryTest is Test {
     function test_AuthorizedConsumerCanConsumePolicy() public {
         registry.setAuthorizedConsumer(hook);
 
-        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         assertFalse(registry.isConsumed(trader, nonce));
 
@@ -177,7 +179,7 @@ contract PolicyRegistryTest is Test {
     function test_RevertWhenPolicyConsumedTwice() public {
         registry.setAuthorizedConsumer(hook);
 
-        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         vm.startPrank(hook);
 
@@ -205,7 +207,7 @@ contract PolicyRegistryTest is Test {
     function test_RevertWhenExpiredPolicyIsConsumed() public {
         registry.setAuthorizedConsumer(hook);
 
-        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         vm.warp(expiry);
 
@@ -243,7 +245,7 @@ contract PolicyRegistryTest is Test {
 
         vm.expectRevert(PolicyRegistry.Unauthorized.selector);
 
-        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
     }
 
     function test_NewRegistrarCanRegisterAfterRotation() public {
@@ -253,7 +255,7 @@ contract PolicyRegistryTest is Test {
 
         vm.prank(newRegistrar);
 
-        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee);
+        bytes32 policyId = registry.registerPolicy(poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
 
         assertTrue(policyId != bytes32(0));
         assertTrue(registry.isRegistered(trader, nonce));

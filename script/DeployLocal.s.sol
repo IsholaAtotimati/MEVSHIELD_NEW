@@ -58,6 +58,7 @@ contract DeployLocal is Script {
         PolicyRegistry(info.registry).setAuthorizedConsumer(info.authorization);
 
         (info.hook, info.salt) = _deployHook(info.manager, info.authorization);
+        PolicyAuthorization(info.authorization).setAuthorizedHook(info.hook);
 
         info.router = address(new MEVShieldRouter(IPoolManager(info.manager)));
 

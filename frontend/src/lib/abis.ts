@@ -41,6 +41,7 @@ export const policyRegistryAbi = [
           { name: "expiry", type: "uint256" },
           { name: "maxLoss", type: "uint256" },
           { name: "maxFee", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
         ],
       },
     ],
@@ -102,6 +103,7 @@ export const policyAuthorizationAbi = [
           { name: "zeroForOne", type: "bool" },
           { name: "amountSpecified", type: "int256" },
           { name: "sqrtPriceLimitX96", type: "uint160" },
+          { name: "minAmountOut", type: "uint256" },
         ],
       },
       { name: "signature", type: "bytes" },
@@ -129,6 +131,11 @@ export const policyAuthorizationAbi = [
 ] as const;
 
 export const mevShieldRouterAbi = [
+  {
+    type: "error",
+    name: "InvalidPayer",
+    inputs: [],
+  },
   {
     type: "function",
     name: "executeSwap",
@@ -162,6 +169,13 @@ export const mevShieldRouterAbi = [
 ] as const;
 
 export const erc20Abi = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
   {
     type: "function",
     name: "allowance",

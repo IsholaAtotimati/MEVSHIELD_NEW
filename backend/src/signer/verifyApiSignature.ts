@@ -20,7 +20,8 @@ const types = {
     { name: "maxFee", type: "uint256" },
     { name: "zeroForOne", type: "bool" },
     { name: "amountSpecified", type: "int256" },
-    { name: "sqrtPriceLimitX96", type: "uint160" }
+    { name: "sqrtPriceLimitX96", type: "uint160" },
+    { name: "minAmountOut", type: "uint256" }
   ]
 };
 
@@ -38,7 +39,8 @@ const policy = {
   zeroForOne: true,
   amountSpecified: -100000000n,
   sqrtPriceLimitX96:
-    79228162514264337593543950336n
+    79228162514264337593543950336n,
+  minAmountOut: 1n
 };
 
 const signature =

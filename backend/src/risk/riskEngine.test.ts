@@ -6,8 +6,8 @@ const positive = calculateRisk({
   zeroForOne: true
 });
 
-assert.equal(positive.actualLoss, 1_000n);
-assert.equal(positive.actualFee, 100n);
+assert.equal(positive.estimatedLoss, 1_000n);
+assert.equal(positive.estimatedFee, 100n);
 assert.equal(positive.maxLoss, 2_000n);
 assert.equal(positive.maxFee, 200n);
 assert.equal(positive.riskLevel, "LOW");
@@ -17,8 +17,8 @@ const negative = calculateRisk({
   zeroForOne: false
 });
 
-assert.equal(negative.actualLoss, 1_000n);
-assert.equal(negative.actualFee, 100n);
+assert.equal(negative.estimatedLoss, 1_000n);
+assert.equal(negative.estimatedFee, 100n);
 assert.equal(negative.maxLoss, 2_000n);
 assert.equal(negative.maxFee, 200n);
 assert.equal(negative.riskLevel, "LOW");
@@ -28,8 +28,8 @@ const zero = calculateRisk({
   zeroForOne: true
 });
 
-assert.equal(zero.actualLoss, 0n);
-assert.equal(zero.actualFee, 0n);
+assert.equal(zero.estimatedLoss, 0n);
+assert.equal(zero.estimatedFee, 0n);
 assert.equal(zero.maxLoss, 0n);
 assert.equal(zero.maxFee, 0n);
 assert.equal(zero.riskLevel, "LOW");

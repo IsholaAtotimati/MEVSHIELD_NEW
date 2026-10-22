@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/risk/riskEngine.test.ts src/observability/requestCorrelation.test.ts",
+    "test": "tsx --test src/config/runtimeConfig.test.ts src/policy/policyRequest.test.ts src/policy/policySigning.test.ts src/risk/riskEngine.test.ts src/observability/requestCorrelation.test.ts src/risk/riskPreview.test.ts",
     "dev": "tsx src/server.ts",
+    "demo": "NODE_ENV=development MEVSHIELD_SEPOLIA_DEMO_ENABLED=true tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },

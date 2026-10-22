@@ -36,6 +36,7 @@ contract PolicyAuthorizationTest is Test {
         verifier.setAuthorizedSigner(signer);
 
         registry.setAuthorizedConsumer(address(authorization));
+        authorization.setAuthorizedHook(address(this));
 
         policy = PolicyVerifier.Policy({
             poolId: poolId,
@@ -46,7 +47,8 @@ contract PolicyAuthorizationTest is Test {
             maxFee: 5,
             zeroForOne: true,
             amountSpecified: -100e6,
-            sqrtPriceLimitX96: 79228162514264337593543950336
+            sqrtPriceLimitX96: 79228162514264337593543950336,
+            minAmountOut: 1
         });
     }
 
@@ -63,7 +65,9 @@ contract PolicyAuthorizationTest is Test {
     }
 
     function _registerPolicy(PolicyVerifier.Policy memory p) internal returns (bytes32 policyId) {
-        policyId = registry.registerPolicy(p.poolId, p.trader, p.nonce, p.expiry, p.maxLoss, p.maxFee);
+        policyId = registry.registerPolicy(
+            p.poolId, p.trader, p.nonce, p.expiry, p.maxLoss, p.maxFee, p.minAmountOut
+        );
     }
 
     /*
@@ -74,6 +78,18 @@ contract PolicyAuthorizationTest is Test {
      */
     function _authorize(PolicyVerifier.Policy memory p, bytes memory signature) internal {
         authorization.authorize(p, signature);
+    }
+
+    function test_UnauthorizedCallerCannotConsumeRegisteredPolicy() public {
+        _registerPolicy(policy);
+        bytes memory signature = _signPolicy(policy);
+        address unauthorizedCaller = address(0xBAD);
+
+        vm.expectRevert(PolicyAuthorization.Unauthorized.selector);
+        vm.prank(unauthorizedCaller);
+        authorization.authorize(policy, signature);
+
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
     function test_ValidPolicyCanBeAuthorized() public {
@@ -121,6 +137,25 @@ contract PolicyAuthorizationTest is Test {
         vm.expectRevert(PolicyVerifier.UnauthorizedSigner.selector);
 
         verifier.verifyPolicy(wrongPolicy, signature);
+    }
+
+    function test_RevertWhenRegisteredMinimumOutputDiffersFromSignedPolicy() public {
+        PolicyVerifier.Policy memory registeredPolicy = policy;
+        registeredPolicy.minAmountOut += 1;
+        registry.registerPolicy(
+            registeredPolicy.poolId,
+            registeredPolicy.trader,
+            registeredPolicy.nonce,
+            registeredPolicy.expiry,
+            registeredPolicy.maxLoss,
+            registeredPolicy.maxFee,
+            registeredPolicy.minAmountOut
+        );
+
+        bytes memory signature = _signPolicy(policy);
+        vm.expectRevert(PolicyAuthorization.PolicyMismatch.selector);
+        authorization.authorize(policy, signature);
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
     function test_RevertWhenValidSignatureButWrongTrader() public {

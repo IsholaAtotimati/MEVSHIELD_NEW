@@ -15,6 +15,13 @@ import {MEVShieldRouter} from "../src/MEVShieldRouter.sol";
 
 contract DeploySepolia is Script {
     // DEPLOYER_PRIVATE_KEY and SIGNER_PRIVATE_KEY must be provided through the environment.
+    uint256 internal constant SEPOLIA_CHAIN_ID = 11155111;
+    address internal constant EXPECTED_AUTHORIZED_SIGNER =
+        0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
+    address internal constant POOL_MANAGER =
+        0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+    address internal constant CREATE2_DEPLOYER =
+        0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     struct DeploymentInfo {
         address manager;
@@ -29,11 +36,17 @@ contract DeploySepolia is Script {
     }
 
     function run() external {
+        require(block.chainid == SEPOLIA_CHAIN_ID, "Wrong chain: expected Sepolia");
+
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         uint256 signerKey = vm.envUint("SIGNER_PRIVATE_KEY");
 
         address deployer = vm.addr(deployerKey);
         address signer = vm.addr(signerKey);
+
+        require(signer == EXPECTED_AUTHORIZED_SIGNER, "Unexpected authorized signer");
+        require(POOL_MANAGER.code.length > 0, "Sepolia PoolManager is not deployed");
+        require(CREATE2_DEPLOYER.code.length > 0, "CREATE2 deployer is not deployed");
 
         console2.log("Deployer:", deployer);
         console2.log("Signer:", signer);
@@ -45,7 +58,7 @@ contract DeploySepolia is Script {
         info.deployer = deployer;
         info.signer = signer;
 
-        info.manager = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+        info.manager = POOL_MANAGER;
         info.registry = address(new PolicyRegistry());
         info.verifier = address(new PolicyVerifier());
 
@@ -56,6 +69,7 @@ contract DeploySepolia is Script {
         PolicyRegistry(info.registry).setAuthorizedConsumer(info.authorization);
 
         (info.hook, info.salt) = _deployHook(info.manager, info.authorization);
+        PolicyAuthorization(info.authorization).setAuthorizedHook(info.hook);
 
         info.router = address(new MEVShieldRouter(IPoolManager(info.manager)));
 
@@ -73,8 +87,6 @@ contract DeploySepolia is Script {
 
         bytes32 initCodeHash = keccak256(initCode);
 
-        address create2Deployer = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-
         address predictedHook;
         bool found;
 
@@ -85,7 +97,7 @@ contract DeploySepolia is Script {
 
             address candidate = address(
                 uint160(
-                    uint256(keccak256(abi.encodePacked(bytes1(0xff), create2Deployer, candidateSalt, initCodeHash)))
+                    uint256(keccak256(abi.encodePacked(bytes1(0xff), CREATE2_DEPLOYER, candidateSalt, initCodeHash)))
                 )
             );
 
@@ -102,11 +114,11 @@ contract DeploySepolia is Script {
 
         require(found, "Could not find valid hook salt");
         require(
-            predictedHook == vm.computeCreate2Address(salt, initCodeHash, create2Deployer),
+            predictedHook == vm.computeCreate2Address(salt, initCodeHash, CREATE2_DEPLOYER),
             "CREATE2 address calculation mismatch"
         );
 
-        (bool success, bytes memory result) = create2Deployer.call(abi.encodePacked(salt, initCode));
+        (bool success, bytes memory result) = CREATE2_DEPLOYER.call(abi.encodePacked(salt, initCode));
 
         require(success, "CREATE2 deployment failed");
 

@@ -226,7 +226,20 @@ code {
   margin-bottom: 0;
 }
 
+.demo-warning {
+  border: 1px solid #886b2f;
+  border-radius: 10px;
+  background: rgba(136, 107, 47, 0.14);
+  color: #f3d38c;
+  line-height: 1.5;
+  padding: 12px 14px;
+}
+
 @media (max-width: 720px) {
+  .chain {
+    margin-left: 0;
+  }
+
   .hero {
     align-items: flex-start;
     flex-direction: column;
@@ -262,6 +275,75 @@ code {
   font-weight: 800;
   letter-spacing: 0.08em;
   white-space: nowrap;
+}
+
+
+.swap-inputs {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+  max-width: 560px;
+}
+
+.swap-inputs label {
+  display: grid;
+  gap: 8px;
+  color: #aeb5c2;
+  font-size: 13px;
+}
+
+.swap-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.swap-input-row input,
+.swap-input-row select {
+  min-width: 0;
+  border: 1px solid #303744;
+  background: #090c11;
+  color: white;
+  border-radius: 10px;
+  padding: 13px 14px;
+}
+
+.swap-input-row input {
+  flex: 1;
+}
+
+.swap-input-row select {
+  width: 110px;
+}
+
+.swap-input-row input[readonly] {
+  color: #8d96a5;
+}
+
+.swap-input-row select option:disabled {
+  color: #737d8d;
+}
+
+.swap-direction {
+  justify-self: start;
+  max-width: 100%;
+  color: #c8cefa;
+  text-align: left;
+}
+
+.amount-conversion {
+  margin: 0;
+  color: #8d96a5;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.token-label {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid #303744;
+  border-radius: 10px;
+  background: #090c11;
 }
 
 .swap-summary {

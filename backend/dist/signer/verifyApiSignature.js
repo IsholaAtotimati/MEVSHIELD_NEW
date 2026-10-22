@@ -15,7 +15,8 @@ const types = {
         { name: "maxFee", type: "uint256" },
         { name: "zeroForOne", type: "bool" },
         { name: "amountSpecified", type: "int256" },
-        { name: "sqrtPriceLimitX96", type: "uint160" }
+        { name: "sqrtPriceLimitX96", type: "uint160" },
+        { name: "minAmountOut", type: "uint256" }
     ]
 };
 const policy = {
@@ -27,7 +28,8 @@ const policy = {
     maxFee: 20000n,
     zeroForOne: true,
     amountSpecified: -100000000n,
-    sqrtPriceLimitX96: 79228162514264337593543950336n
+    sqrtPriceLimitX96: 79228162514264337593543950336n,
+    minAmountOut: 1n
 };
 const signature = "0xd62929055afee3e1293fc8639b0c64cd1ed2bed826ee458876ef12f52f26f5342f68e0305a00dacf1b1d3151cc5f5fe2b0de2495afae7246d034d5b53b870df21c";
 const recovered = verifyTypedData(domain, types, policy, signature);

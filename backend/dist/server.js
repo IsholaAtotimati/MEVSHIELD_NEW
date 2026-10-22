@@ -2,14 +2,17 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
-import { AbiCoder, Wallet, keccak256 } from "ethers";
+import { AbiCoder, keccak256 } from "ethers";
 import { generatePolicy } from "./policy/policyGenerator.js";
-import { signPolicy } from "./signer/policySigner.js";
+import { previewRisk, RiskPreviewRequestSchema } from "./risk/riskPreview.js";
+import { signProtectedPolicy } from "./policy/policySigning.js";
+import { PolicyRequestSchema } from "./policy/policyRequest.js";
 import { httpLifecycleMiddleware } from "./middleware/httpLifecycle.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { startSepoliaMonitor } from "./monitor/sepolia.js";
 import { logEvent } from "./observability/logger.js";
 import { trackPolicyRequest } from "./observability/requestCorrelation.js";
+import { assertConfiguredPoolId, isLocalSepoliaDemoEnabled, loadBackendConfig, publicProtectedPoolConfig, } from "./config/runtimeConfig.js";
 const app = express();
 const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:5173";
 app.use(requestIdMiddleware);
@@ -17,23 +20,16 @@ app.use(httpLifecycleMiddleware);
 app.use(cors({ origin: FRONTEND_URL, exposedHeaders: ["x-request-id"] }));
 app.use(express.json());
 const PORT = Number(process.env.PORT ?? 4000);
-const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY?.trim() ||
-    "0x00000000000000000000000000000000000000000000000000000000000A11CE";
-const CHAIN_ID = Number(process.env.CHAIN_ID ?? 31337);
-const VERIFIER_ADDRESS = process.env.POLICY_VERIFIER_ADDRESS ??
-    process.env.VERIFIER_ADDRESS ??
-    process.env.POLICY_VERIFIER ??
-    "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-const wallet = new Wallet(SIGNER_PRIVATE_KEY);
-const PolicyRequestSchema = z.object({
-    poolId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-    trader: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-    nonce: z.string(),
-    expiry: z.string(),
-    amountSpecified: z.string(),
-    zeroForOne: z.boolean(),
-    sqrtPriceLimitX96: z.string()
-});
+const V2_POLICY_SIGNING_ENABLED = process.env.MEVSHIELD_V2_POLICY_ENABLED === "true";
+const LOCAL_SEPOLIA_DEMO_ENABLED = isLocalSepoliaDemoEnabled(process.env);
+const POLICY_SIGNING_ENABLED = V2_POLICY_SIGNING_ENABLED || LOCAL_SEPOLIA_DEMO_ENABLED;
+const { chainId: CHAIN_ID, verifierAddress: VERIFIER_ADDRESS, signerWallet: wallet, routerAddress: MEVSHIELD_ROUTER, protectedPool: PROTECTED_POOL, } = loadBackendConfig();
+if (LOCAL_SEPOLIA_DEMO_ENABLED) {
+    logEvent("warn", "local_sepolia_demo_signing_enabled", {
+        minimumOutputBaseUnits: "1",
+        warning: "This demo minimum is not meaningful slippage protection.",
+    });
+}
 const TransactionEventSchema = z.object({
     event: z.enum([
         "policy_registration_submitted",
@@ -49,23 +45,58 @@ const TransactionEventSchema = z.object({
     errorName: z.string().max(100).optional(),
     errorMessage: z.string().max(300).optional(),
 });
-const MEVSHIELD_ROUTER = (process.env.ROUTER_ADDRESS ?? process.env.MEVSHIELD_ROUTER)?.trim();
-if (!MEVSHIELD_ROUTER) {
-    throw new Error("MEVSHIELD_ROUTER is not set");
-}
 app.get("/health", (_req, res) => {
     res.json({
         status: "ok",
         service: "mevshield-backend",
         environment: process.env.NODE_ENV ?? "development",
         chainId: CHAIN_ID,
+        policySigningEnabled: POLICY_SIGNING_ENABLED,
+        localDemoMode: LOCAL_SEPOLIA_DEMO_ENABLED,
         sepoliaMonitor: getSepoliaMonitorStatus(),
     });
 });
+app.get("/config/protected-pool", (_req, res) => {
+    res.json(publicProtectedPoolConfig(CHAIN_ID, PROTECTED_POOL));
+});
+app.post("/risk-preview", (req, res) => {
+    const parsed = RiskPreviewRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({
+            error: "Invalid risk-preview request",
+            details: parsed.error.issues,
+        });
+    }
+    const result = previewRisk(parsed.data);
+    if (!result.ok) {
+        return res.status(400).json({ error: result.error });
+    }
+    return res.json(result.data);
+});
 app.post("/policy", async (req, res) => {
+    if (!POLICY_SIGNING_ENABLED) {
+        return res.status(503).json({
+            error: "Policy signing is disabled until the v2 minimum-output contracts are deployed and verified.",
+        });
+    }
     try {
         const input = PolicyRequestSchema.parse(req.body);
         const requestId = String(res.locals.requestId);
+        if (LOCAL_SEPOLIA_DEMO_ENABLED && input.minAmountOut !== "1") {
+            return res.status(400).json({
+                error: "Invalid demo minimum output",
+                details: "Local Sepolia demo policies must use a minimum output of exactly 1 base unit.",
+            });
+        }
+        try {
+            assertConfiguredPoolId(input.poolId, PROTECTED_POOL);
+        }
+        catch {
+            return res.status(400).json({
+                error: "Invalid protected pool",
+                details: "The requested pool ID does not match the configured Sepolia WETH/USDC pool.",
+            });
+        }
         if (input.trader.toLowerCase() !== MEVSHIELD_ROUTER.toLowerCase()) {
             return res.status(400).json({
                 error: "Invalid policy trader",
@@ -86,15 +117,16 @@ app.post("/policy", async (req, res) => {
             expiry: BigInt(input.expiry),
             amountSpecified: BigInt(input.amountSpecified),
             zeroForOne: input.zeroForOne,
-            sqrtPriceLimitX96: BigInt(input.sqrtPriceLimitX96)
+            sqrtPriceLimitX96: BigInt(input.sqrtPriceLimitX96),
+            minAmountOut: BigInt(input.minAmountOut)
         });
         logEvent("info", "risk_analysis_completed", {
             requestId,
             riskLevel: result.riskLevel,
             maxLoss: result.policy.maxLoss.toString(),
             maxFee: result.policy.maxFee.toString(),
-            estimatedLoss: result.actualLoss.toString(),
-            estimatedFee: result.actualFee.toString(),
+            estimatedLoss: result.estimatedLoss.toString(),
+            estimatedFee: result.estimatedFee.toString(),
         });
         logEvent("info", "policy_created", {
             requestId,
@@ -107,10 +139,12 @@ app.post("/policy", async (req, res) => {
             zeroForOne: result.policy.zeroForOne,
             amountSpecified: result.policy.amountSpecified.toString(),
             sqrtPriceLimitX96: result.policy.sqrtPriceLimitX96.toString(),
+            minAmountOut: result.policy.minAmountOut.toString(),
         });
-        const signature = await signPolicy(wallet, result.policy, {
+        const signature = await signProtectedPolicy(wallet, result.policy, {
             chainId: CHAIN_ID,
-            verifyingContract: VERIFIER_ADDRESS
+            verifierAddress: VERIFIER_ADDRESS,
+            protectedPool: PROTECTED_POOL,
         });
         logEvent("info", "policy_signed", {
             requestId,
@@ -132,14 +166,16 @@ app.post("/policy", async (req, res) => {
                 maxLoss: result.policy.maxLoss.toString(),
                 maxFee: result.policy.maxFee.toString(),
                 amountSpecified: result.policy.amountSpecified.toString(),
-                sqrtPriceLimitX96: result.policy.sqrtPriceLimitX96.toString()
+                sqrtPriceLimitX96: result.policy.sqrtPriceLimitX96.toString(),
+                minAmountOut: result.policy.minAmountOut.toString()
             },
-            actualLoss: result.actualLoss.toString(),
-            actualFee: result.actualFee.toString(),
+            estimatedLoss: result.estimatedLoss.toString(),
+            estimatedFee: result.estimatedFee.toString(),
             riskLevel: result.riskLevel,
             signature,
             policyId,
             requestId,
+            demoMode: LOCAL_SEPOLIA_DEMO_ENABLED,
         });
     }
     catch (error) {

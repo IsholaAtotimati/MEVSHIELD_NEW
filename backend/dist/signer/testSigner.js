@@ -15,7 +15,8 @@ const policy = {
     maxFee: 5n,
     zeroForOne: true,
     amountSpecified: -100000000n,
-    sqrtPriceLimitX96: 79228162514264337593543950336n
+    sqrtPriceLimitX96: 79228162514264337593543950336n,
+    minAmountOut: 1n,
 };
 // Solidity:
 // keccak256("ETH/USDC")
@@ -43,7 +44,8 @@ const types = {
         { name: "maxFee", type: "uint256" },
         { name: "zeroForOne", type: "bool" },
         { name: "amountSpecified", type: "int256" },
-        { name: "sqrtPriceLimitX96", type: "uint160" }
+        { name: "sqrtPriceLimitX96", type: "uint160" },
+        { name: "minAmountOut", type: "uint256" }
     ]
 };
 const signature = await signPolicy(wallet, policy, config);
@@ -56,7 +58,8 @@ const digest = TypedDataEncoder.hash(domain, types, {
     maxFee: policy.maxFee,
     zeroForOne: policy.zeroForOne,
     amountSpecified: policy.amountSpecified,
-    sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+    sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+    minAmountOut: policy.minAmountOut
 });
 const recovered = verifyTypedData(domain, types, {
     poolId: policy.poolId,
@@ -67,7 +70,8 @@ const recovered = verifyTypedData(domain, types, {
     maxFee: policy.maxFee,
     zeroForOne: policy.zeroForOne,
     amountSpecified: policy.amountSpecified,
-    sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+    sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+    minAmountOut: policy.minAmountOut
 }, signature);
 console.log("Signer:   ", wallet.address);
 console.log("Recovered:", recovered);

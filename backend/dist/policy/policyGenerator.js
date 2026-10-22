@@ -13,12 +13,13 @@ export function generatePolicy(request) {
         maxFee: risk.maxFee,
         zeroForOne: request.zeroForOne,
         amountSpecified: request.amountSpecified,
-        sqrtPriceLimitX96: request.sqrtPriceLimitX96
+        sqrtPriceLimitX96: request.sqrtPriceLimitX96,
+        minAmountOut: request.minAmountOut
     };
     return {
         policy,
-        actualLoss: risk.actualLoss,
-        actualFee: risk.actualFee,
+        estimatedLoss: risk.estimatedLoss,
+        estimatedFee: risk.estimatedFee,
         riskLevel: risk.riskLevel
     };
 }

@@ -33,7 +33,8 @@ contract PolicyVerifierTest is Test {
             maxFee: 5,
             zeroForOne: true,
             amountSpecified: -100e6,
-            sqrtPriceLimitX96: 79228162514264337593543950336
+            sqrtPriceLimitX96: 79228162514264337593543950336,
+            minAmountOut: 1
         });
     }
 
@@ -129,6 +130,14 @@ contract PolicyVerifierTest is Test {
 
         vm.expectRevert(PolicyVerifier.UnauthorizedSigner.selector);
 
+        verifier.verifyPolicy(policy, signature);
+    }
+
+    function test_RevertWhenMinimumOutputModified() public {
+        bytes memory signature = _signPolicy(policy, signerPrivateKey);
+        policy.minAmountOut += 1;
+
+        vm.expectRevert(PolicyVerifier.UnauthorizedSigner.selector);
         verifier.verifyPolicy(policy, signature);
     }
 

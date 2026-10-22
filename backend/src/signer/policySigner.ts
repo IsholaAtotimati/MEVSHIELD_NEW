@@ -16,7 +16,8 @@ const TYPES = {
     { name: "maxFee", type: "uint256" },
     { name: "zeroForOne", type: "bool" },
     { name: "amountSpecified", type: "int256" },
-    { name: "sqrtPriceLimitX96", type: "uint160" }
+    { name: "sqrtPriceLimitX96", type: "uint160" },
+    { name: "minAmountOut", type: "uint256" }
   ]
 };
 
@@ -41,7 +42,8 @@ export async function signPolicy(
     maxFee: policy.maxFee,
     zeroForOne: policy.zeroForOne,
     amountSpecified: policy.amountSpecified,
-    sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+    sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+    minAmountOut: policy.minAmountOut
   });
 }
 

@@ -3,7 +3,7 @@ import type { Address, Hex } from "viem";
 import {
   encodeAbiParameters,
   formatEther,
-  keccak256,
+  formatUnits,
 } from "viem";
 
 import {
@@ -29,37 +29,76 @@ import {
   logFrontend,
   safeError,
 } from "./lib/observability";
+import {
+  calculatePoolId,
+  calculateDemoOutput,
+  calculateMinimumOutput,
+  calculateSwapReadiness,
+  decodePoolState,
+  getZeroForOne,
+  isFreshDemoPoolReadiness,
+  isFreshQuote,
+  loadProtectedPoolQuote,
+  matchesBackendProtectedPoolConfig,
+  parseTokenAmount,
+  poolManagerStateAbi,
+  poolStateSlots,
+  sortCurrencies,
+  DEMO_MIN_AMOUNT_OUT,
+  DEMO_USDC_PER_WETH,
+  type PoolExpectation,
+  type ProtectedPoolSnapshot,
+  type ProtectedQuote,
+} from "./lib/protectedQuote";
 
 import "./App.css";
 
 const BACKEND_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
-const SWAP_CONFIG = {
-  poolId:
-    "0x75eeb1ab079f55178bbe93102539d5d3cab08ab019b0bb1e05a8d6cc4d5002d8",
+type TokenSymbol = "ETH" | "USDC";
 
-  currency0:
-    "0x3722a74BD678c358c9cbE47F43400C97C9cDb1D0" as Address,
-
-  currency1:
-    "0x83029461d33A575A2AD852BE69a0BB0aDC68988e" as Address,
-
-  fee: 3000,
-
-  tickSpacing: 60,
-
-  hooks:
-    CONTRACTS.mevShieldHook,
-
-  zeroForOne: true,
-
-  amountSpecified: "-100000000",
-
-  sqrtPriceLimitX96: "4295128740",
-
-  trader:
-    CONTRACTS.mevShieldRouter as Address,
+const SWAP_TOKENS: Record<
+  TokenSymbol,
+  { address: Address; decimals: number; poolSymbol: string; displayName: string }
+> = {
+  ETH: {
+    address: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+    decimals: 18,
+    poolSymbol: "WETH",
+    displayName: "Sepolia test ETH (executes as WETH)",
+  },
+  USDC: {
+    address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    decimals: 6,
+    poolSymbol: "USDC",
+    displayName: "Sepolia test USDC",
+  },
 };
+
+const SWAP_POOL_KEY = {
+  ...sortCurrencies(SWAP_TOKENS.ETH.address, SWAP_TOKENS.USDC.address),
+  fee: 3000,
+  tickSpacing: 60,
+  hooks: CONTRACTS.mevShieldHook,
+};
+
+const SWAP_POOL_ID = calculatePoolId(SWAP_POOL_KEY);
+const SWAP_POOL_EXPECTATION: PoolExpectation = {
+  chainId: CHAIN_ID,
+  poolManager: CONTRACTS.poolManager,
+  hook: CONTRACTS.mevShieldHook,
+  hookAuthorization: CONTRACTS.poolAuthorization,
+  poolKey: SWAP_POOL_KEY,
+  poolId: SWAP_POOL_ID,
+};
+
+const MIN_SQRT_PRICE_LIMIT_X96 = 4295128740n;
+const MAX_SQRT_PRICE_LIMIT_X96 =
+  1461446703485210103287273052203988822378723970341n;
+const SEPOLIA_DEMO_MODE =
+  import.meta.env.DEV && import.meta.env.VITE_SEPOLIA_DEMO_MODE === "true";
+const MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED =
+  import.meta.env.VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED === "true";
 
 type DeploymentStatus = {
   poolManager: Address | null;
@@ -82,15 +121,31 @@ type PolicyResponse = {
     zeroForOne: boolean;
     amountSpecified: string;
     sqrtPriceLimitX96: string;
+    minAmountOut: string;
   };
-  actualLoss: string;
-  actualFee: string;
+  estimatedLoss: string;
+  estimatedFee: string;
   riskLevel: string;
   signature: string;
   policyId: string;
   requestId: string;
+  demoMode?: boolean;
   txHash?: Hex;
   registered?: boolean;
+};
+
+type RiskPreviewResult = {
+  estimatedLoss: string;
+  estimatedFee: string;
+  maxLoss: string;
+  maxFee: string;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH";
+  model: string;
+  disclaimer: string;
+  requestedAmount: string;
+  inputToken: TokenSymbol;
+  outputToken: TokenSymbol;
+  zeroForOne: boolean;
 };
 
 type ExecutionResponse = {
@@ -105,6 +160,14 @@ type ExecutionResponse = {
 function shortAddress(address?: string | null) {
   if (!address) return "—";
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function isLocalBackendUrl(value: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(value).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function App() {
@@ -134,9 +197,82 @@ function App() {
   const [isCreatingPolicy, setIsCreatingPolicy] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isInspecting, setIsInspecting] = useState(false);
+  const [isPreviewingRisk, setIsPreviewingRisk] = useState(false);
+  const [riskPreview, setRiskPreview] = useState<RiskPreviewResult | null>(null);
 
   const [actionStatus, setActionStatus] =
     useState("Ready to calculate swap risk.");
+
+  const [inputToken, setInputToken] = useState<TokenSymbol>("ETH");
+  const [outputToken, setOutputToken] = useState<TokenSymbol>("USDC");
+  const [inputAmount, setInputAmount] = useState("");
+  const [slippageBps, setSlippageBps] = useState(50);
+  const [protectedQuote, setProtectedQuote] = useState<ProtectedQuote>({
+    status: "unavailable",
+    reason: "not-checked",
+  });
+  const [quoteClockMs, setQuoteClockMs] = useState(0);
+  const [backendPoolKeyVerified, setBackendPoolKeyVerified] = useState(false);
+  const inputAmountBaseUnits = parseTokenAmount(
+    inputAmount,
+    SWAP_TOKENS[inputToken].decimals,
+  );
+  const zeroForOne = getZeroForOne(
+    SWAP_TOKENS[inputToken].address,
+    SWAP_TOKENS[outputToken].address,
+    SWAP_POOL_KEY,
+  );
+  const quoteIsFresh = isFreshQuote(
+    protectedQuote,
+    quoteClockMs,
+    inputAmountBaseUnits,
+    SWAP_POOL_ID,
+  );
+  const demoEstimateBaseUnits =
+    SEPOLIA_DEMO_MODE && inputAmountBaseUnits !== null && zeroForOne !== null
+      ? calculateDemoOutput(inputAmountBaseUnits, zeroForOne)
+      : null;
+  const demoEstimateReady =
+    demoEstimateBaseUnits !== null &&
+    isFreshDemoPoolReadiness(protectedQuote, quoteClockMs);
+  const demoBackendIsLocal =
+    !SEPOLIA_DEMO_MODE || isLocalBackendUrl(BACKEND_URL);
+  const hasAuthorization = Boolean(
+    deployment.authorization &&
+      deployment.authorizedConsumer?.toLowerCase() ===
+        deployment.authorization.toLowerCase(),
+  );
+  const protocolAddressesVerified = Boolean(
+    deployment.poolManager?.toLowerCase() === CONTRACTS.poolManager.toLowerCase() &&
+      deployment.authorization?.toLowerCase() === CONTRACTS.poolAuthorization.toLowerCase() &&
+      deployment.registry?.toLowerCase() === CONTRACTS.policyRegistry.toLowerCase() &&
+      deployment.verifier?.toLowerCase() === CONTRACTS.policyVerifier.toLowerCase() &&
+      deployment.authorizedSigner?.toLowerCase() ===
+        CONTRACTS.authorizedSigner.toLowerCase(),
+  );
+  const hasValidPolicyBounds = Boolean(
+    policy?.registered &&
+      /^\d+$/.test(policy.policy.maxLoss) &&
+      /^\d+$/.test(policy.policy.maxFee) &&
+      /^[1-9]\d*$/.test(policy.policy.minAmountOut),
+  );
+  const swapReadiness = calculateSwapReadiness({
+    amountInBaseUnits: inputAmountBaseUnits,
+    quote: protectedQuote,
+    nowMs: quoteClockMs,
+    poolId: SWAP_POOL_ID,
+    poolKeyMatches: calculatePoolId(SWAP_POOL_KEY) === SWAP_POOL_ID && zeroForOne !== null,
+    backendPoolKeyVerified: backendPoolKeyVerified && demoBackendIsLocal,
+    protocolAddressesVerified,
+    minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
+    authorizationVerified: hasAuthorization,
+    policyBoundsVerified: hasValidPolicyBounds,
+    demoMode: SEPOLIA_DEMO_MODE,
+    demoEstimateAvailable: demoEstimateReady,
+  });
+  const routeDirection = zeroForOne === null
+    ? "Unsupported token pair"
+    : `${SWAP_TOKENS[inputToken].poolSymbol} → ${SWAP_TOKENS[outputToken].poolSymbol} (zeroForOne: ${zeroForOne})`;
 
   async function connectWallet() {
     try {
@@ -229,6 +365,84 @@ function App() {
       setStatus(
         "Could not connect to Sepolia. Check your RPC connection.",
       );
+    }
+  }
+
+  async function inspectProtectedPool() {
+    const quote = await loadProtectedPoolQuote(async () => {
+      const slots = poolStateSlots(SWAP_POOL_ID);
+      const blockNumber = await publicClient.getBlockNumber();
+      const [
+        chainId,
+        managerCode,
+        hookCode,
+        hookPoolManager,
+        hookAuthorization,
+        slot0,
+        liquidity,
+      ] = await Promise.all([
+        publicClient.getChainId(),
+        publicClient.getCode({ address: CONTRACTS.poolManager, blockNumber }),
+        publicClient.getCode({ address: CONTRACTS.mevShieldHook, blockNumber }),
+        publicClient.readContract({
+          address: CONTRACTS.mevShieldHook,
+          abi: mevShieldHookAbi,
+          functionName: "poolManager",
+          blockNumber,
+        }),
+        publicClient.readContract({
+          address: CONTRACTS.mevShieldHook,
+          abi: mevShieldHookAbi,
+          functionName: "authorization",
+          blockNumber,
+        }),
+        publicClient.readContract({
+          address: CONTRACTS.poolManager,
+          abi: poolManagerStateAbi,
+          functionName: "extsload",
+          args: [slots.slot0],
+          blockNumber,
+        }),
+        publicClient.readContract({
+          address: CONTRACTS.poolManager,
+          abi: poolManagerStateAbi,
+          functionName: "extsload",
+          args: [slots.liquidity],
+          blockNumber,
+        }),
+      ]);
+      const poolState = decodePoolState(slot0, liquidity);
+      const snapshot: ProtectedPoolSnapshot = {
+        chainId,
+        poolManager: hookPoolManager,
+        hook: CONTRACTS.mevShieldHook,
+        hookPoolManager,
+        hookAuthorization,
+        poolManagerHasCode: Boolean(managerCode && managerCode !== "0x"),
+        hookHasCode: Boolean(hookCode && hookCode !== "0x"),
+        poolId: SWAP_POOL_ID,
+        ...poolState,
+        observedAtMs: Date.now(),
+      };
+      return snapshot;
+    }, SWAP_POOL_EXPECTATION);
+    setProtectedQuote(quote);
+    setQuoteClockMs(Date.now());
+  }
+
+  async function verifyBackendPoolConfiguration() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/config/protected-pool`);
+      if (!response.ok) {
+        setBackendPoolKeyVerified(false);
+        return;
+      }
+      const config: unknown = await response.json();
+      setBackendPoolKeyVerified(
+        matchesBackendProtectedPoolConfig(config, SWAP_POOL_EXPECTATION),
+      );
+    } catch {
+      setBackendPoolKeyVerified(false);
     }
   }
 
@@ -330,21 +544,129 @@ function App() {
     }
   }
 
+
+  async function previewRisk() {
+    if (
+      inputAmountBaseUnits === null ||
+      inputAmountBaseUnits <= 0n ||
+      zeroForOne === null
+    ) {
+      setRiskPreview(null);
+      setActionStatus("Enter a positive amount and select a supported token pair.");
+      return;
+    }
+
+    const requestedAmount = inputAmountBaseUnits.toString();
+    const requestedInputToken = inputToken;
+    const requestedOutputToken = outputToken;
+    const requestedDirection = zeroForOne;
+
+    setIsPreviewingRisk(true);
+    setRiskPreview(null);
+    setActionStatus("Calculating deterministic MVP risk estimate...");
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/risk-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amountSpecified: requestedAmount,
+          zeroForOne: requestedDirection,
+        }),
+      });
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof body.error === "string" ? body.error : "Risk preview failed",
+        );
+      }
+
+      setRiskPreview({
+        ...body,
+        requestedAmount,
+        inputToken: requestedInputToken,
+        outputToken: requestedOutputToken,
+        zeroForOne: requestedDirection,
+      });
+
+      setActionStatus(
+        "Risk preview complete. This is a deterministic MVP estimate, not live market analysis.",
+      );
+    } catch (error) {
+      setActionStatus(`Risk preview failed: ${safeError(error)}`);
+    } finally {
+      setIsPreviewingRisk(false);
+    }
+  }
+
   async function createPolicy() {
+    if (!swapReadiness.canCheckRisk || zeroForOne === null) {
+      setActionStatus(
+        SEPOLIA_DEMO_MODE
+          ? "Demo policy creation requires the local backend and verified Sepolia deployment checks."
+          : "Risk checking is unavailable until a fresh quote for the verified protected pool and matching backend configuration exist.",
+      );
+      return;
+    }
     setIsCreatingPolicy(true);
     setExecution(null);
     setPolicy(null);
     const requestId = createRequestId();
     setPolicyRequestId(requestId);
+    const amountBaseUnits = inputAmountBaseUnits;
+    const amountSpecified =
+      amountBaseUnits === null ? null : -amountBaseUnits;
+    const sqrtPriceLimitX96 = (
+      zeroForOne
+        ? MIN_SQRT_PRICE_LIMIT_X96
+        : MAX_SQRT_PRICE_LIMIT_X96
+    ).toString();
     logFrontend("swap_started", {
       requestId,
-      trader: SWAP_CONFIG.trader,
-      amount: SWAP_CONFIG.amountSpecified,
+      trader: CONTRACTS.mevShieldRouter,
+      amount: amountSpecified?.toString(),
     });
-    setActionStatus("Calculating risk and requesting policy...");
+    setActionStatus(
+      SEPOLIA_DEMO_MODE
+        ? "Creating a demo policy with a 1-base-unit minimum output..."
+        : "Calculating risk and requesting policy...",
+    );
 
     let registrationTxHash: Hex | undefined;
     try {
+      if (
+        amountBaseUnits === null ||
+        amountBaseUnits <= 0n ||
+        amountSpecified === null
+      ) {
+        throw new Error(
+          `Enter a valid positive ${SWAP_TOKENS[inputToken].poolSymbol} amount with at most ${SWAP_TOKENS[inputToken].decimals} decimal places.`,
+        );
+      }
+      if (
+        !SEPOLIA_DEMO_MODE &&
+        (protectedQuote.status !== "available" || !quoteIsFresh)
+      ) {
+        throw new Error("A genuine fresh protected-pool quote is required before policy signing.");
+      }
+      if (
+        SEPOLIA_DEMO_MODE &&
+        (!demoEstimateReady ||
+          !isFreshDemoPoolReadiness(protectedQuote, Date.now()))
+      ) {
+        throw new Error("A fresh initialized and liquid protected-pool check and a valid demo estimate are required.");
+      }
+      const minAmountOut = SEPOLIA_DEMO_MODE
+        ? DEMO_MIN_AMOUNT_OUT
+        : protectedQuote.status === "available"
+          ? calculateMinimumOutput(protectedQuote.amountOutBaseUnits, slippageBps)
+          : null;
+      if (minAmountOut === null) {
+        throw new Error("Slippage tolerance or quoted minimum output is invalid.");
+      }
+
       const walletClient = getWalletClient();
       const [connectedAccount] = await walletClient.requestAddresses();
 
@@ -354,30 +676,8 @@ function App() {
 
       setAccount(connectedAccount);
 
-      const poolIdFromKey = keccak256(
-        encodeAbiParameters(
-          [
-            {
-              type: "tuple",
-              components: [
-                { name: "currency0", type: "address" },
-                { name: "currency1", type: "address" },
-                { name: "fee", type: "uint24" },
-                { name: "tickSpacing", type: "int24" },
-                { name: "hooks", type: "address" },
-              ],
-            },
-          ],
-          [{
-            currency0: SWAP_CONFIG.currency0,
-            currency1: SWAP_CONFIG.currency1,
-            fee: SWAP_CONFIG.fee,
-            tickSpacing: SWAP_CONFIG.tickSpacing,
-            hooks: SWAP_CONFIG.hooks,
-          }],
-        ),
-      );
-      if (poolIdFromKey !== SWAP_CONFIG.poolId) {
+      const poolIdFromKey = calculatePoolId(SWAP_POOL_KEY);
+      if (poolIdFromKey !== SWAP_POOL_ID) {
         throw new Error(
           "Configured pool ID does not match the pool key and hook. Swap stopped to avoid a failing, high-gas transaction.",
         );
@@ -406,14 +706,14 @@ function App() {
           "x-request-id": requestId,
         },
         body: JSON.stringify({
-          poolId: SWAP_CONFIG.poolId,
-          trader: SWAP_CONFIG.trader,
+          poolId: SWAP_POOL_ID,
+          trader: CONTRACTS.mevShieldRouter,
           nonce: Date.now().toString(),
           expiry: expiry.toString(),
-          amountSpecified: SWAP_CONFIG.amountSpecified,
-          zeroForOne: SWAP_CONFIG.zeroForOne,
-          sqrtPriceLimitX96:
-            SWAP_CONFIG.sqrtPriceLimitX96,
+          amountSpecified: amountSpecified.toString(),
+          zeroForOne,
+          sqrtPriceLimitX96,
+          minAmountOut: minAmountOut.toString(),
         }),
       });
 
@@ -433,6 +733,23 @@ function App() {
         throw new Error(
           data?.error ?? "Policy request failed",
         );
+      }
+      if (SEPOLIA_DEMO_MODE && result.demoMode !== true) {
+        throw new Error(
+          "The local backend is not running with Sepolia demo policy signing enabled.",
+        );
+      }
+
+      if (
+        result.policy.poolId.toLowerCase() !==
+        SWAP_POOL_ID.toLowerCase()
+      ) {
+        throw new Error(
+          "Backend policy pool ID did not match the verified protected pool.",
+        );
+      }
+      if (result.policy.minAmountOut !== minAmountOut.toString()) {
+        throw new Error("Backend policy minimum output differs from the fresh quote and selected slippage.");
       }
 
       if (responseRequestId !== requestId) {
@@ -457,6 +774,7 @@ function App() {
             zeroForOne: result.policy.zeroForOne,
             amountSpecified: BigInt(result.policy.amountSpecified),
             sqrtPriceLimitX96: BigInt(result.policy.sqrtPriceLimitX96),
+            minAmountOut: BigInt(result.policy.minAmountOut),
           },
           result.signature as Hex,
         ],
@@ -534,6 +852,12 @@ function App() {
   }
 
   async function executeProtectedSwap() {
+    if (!swapReadiness.canExecute || zeroForOne === null) {
+      setActionStatus(
+        "Protected execution is unavailable until the protected quote, policy bounds, backend configuration, and on-chain checks are verified.",
+      );
+      return;
+    }
     if (!policy) {
       setActionStatus(
         "Create a policy before executing the swap.",
@@ -542,10 +866,18 @@ function App() {
     }
 
     const requestId = policy.requestId || policyRequestId;
+    const amountBaseUnits = inputAmountBaseUnits;
+    const amountSpecified =
+      amountBaseUnits === null ? null : -amountBaseUnits;
+    const sqrtPriceLimitX96 = (
+      zeroForOne
+        ? MIN_SQRT_PRICE_LIMIT_X96
+        : MAX_SQRT_PRICE_LIMIT_X96
+    ).toString();
     logFrontend("protected_swap_execution_started", {
       requestId,
-      trader: SWAP_CONFIG.trader,
-      amount: SWAP_CONFIG.amountSpecified,
+      trader: CONTRACTS.mevShieldRouter,
+      amount: amountSpecified?.toString(),
       policyHash: policy.policyId,
     });
     setIsExecuting(true);
@@ -565,19 +897,57 @@ function App() {
 
       setAccount(payer);
 
-      const amountSpecified = BigInt(SWAP_CONFIG.amountSpecified);
-      if (amountSpecified >= 0n) {
+      if (
+        amountBaseUnits === null ||
+        amountBaseUnits <= 0n ||
+        amountSpecified === null
+      ) {
         throw new Error(
-          "Wallet-paid swaps currently require a negative exact-input amount.",
+          `Enter a valid positive ${SWAP_TOKENS[inputToken].poolSymbol} amount before execution.`,
         );
       }
-      const amountIn = -amountSpecified;
-      const inputToken = SWAP_CONFIG.zeroForOne
-        ? SWAP_CONFIG.currency0
-        : SWAP_CONFIG.currency1;
+      const requiredMinimumOutput = SEPOLIA_DEMO_MODE
+        ? DEMO_MIN_AMOUNT_OUT
+        : protectedQuote.status === "available"
+          ? calculateMinimumOutput(protectedQuote.amountOutBaseUnits, slippageBps)
+          : null;
+      if (
+        policy.policy.poolId !== SWAP_POOL_ID ||
+        policy.policy.trader.toLowerCase() !== CONTRACTS.mevShieldRouter.toLowerCase() ||
+        policy.policy.amountSpecified !== amountSpecified.toString() ||
+        policy.policy.zeroForOne !== zeroForOne ||
+        requiredMinimumOutput === null ||
+        policy.policy.minAmountOut !== requiredMinimumOutput.toString() ||
+        (!SEPOLIA_DEMO_MODE &&
+          (protectedQuote.status !== "available" || !quoteIsFresh)) ||
+        (SEPOLIA_DEMO_MODE &&
+          (!demoEstimateReady ||
+            !isFreshDemoPoolReadiness(protectedQuote, Date.now())))
+      ) {
+        throw new Error(
+          SEPOLIA_DEMO_MODE
+            ? "The registered demo policy does not match the selected pair, direction, amount, or 1-unit minimum. Request a new policy."
+            : "The registered policy does not match the selected pair, direction, and amount. Request a new policy.",
+        );
+      }
+      const amountIn = amountBaseUnits;
+      const inputTokenAddress = SWAP_TOKENS[inputToken].address;
+
+      const inputBalance = await publicClient.readContract({
+        address: inputTokenAddress,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [payer],
+      });
+
+      if (inputBalance < amountIn) {
+        throw new Error(
+          "Insufficient input-token balance. Fund the connected wallet with the selected pool's input token before executing.",
+        );
+      }
 
       const allowance = await publicClient.readContract({
-        address: inputToken,
+        address: inputTokenAddress,
         abi: erc20Abi,
         functionName: "allowance",
         args: [payer, CONTRACTS.mevShieldRouter],
@@ -588,7 +958,7 @@ function App() {
           "Approve the input token in your wallet; you pay the approval gas.",
         );
         const approvalHash = await walletClient.writeContract({
-          address: inputToken,
+          address: inputTokenAddress,
           abi: erc20Abi,
           functionName: "approve",
           args: [CONTRACTS.mevShieldRouter, amountIn],
@@ -630,6 +1000,7 @@ function App() {
               { name: "zeroForOne", type: "bool" },
               { name: "amountSpecified", type: "int256" },
               { name: "sqrtPriceLimitX96", type: "uint160" },
+              { name: "minAmountOut", type: "uint256" },
             ],
           },
           { type: "bytes" },
@@ -649,10 +1020,11 @@ function App() {
             sqrtPriceLimitX96: BigInt(
               policy.policy.sqrtPriceLimitX96,
             ),
+            minAmountOut: BigInt(policy.policy.minAmountOut),
           },
           policy.signature as Hex,
-          BigInt(policy.actualLoss),
-          BigInt(policy.actualFee),
+          BigInt(policy.estimatedLoss),
+          BigInt(policy.estimatedFee),
         ],
       );
 
@@ -660,19 +1032,11 @@ function App() {
         "Estimating the protected swap before requesting wallet confirmation...",
       );
       const swapArgs = [
+        SWAP_POOL_KEY,
         {
-          currency0: SWAP_CONFIG.currency0,
-          currency1: SWAP_CONFIG.currency1,
-          fee: SWAP_CONFIG.fee,
-          tickSpacing: SWAP_CONFIG.tickSpacing,
-          hooks: SWAP_CONFIG.hooks,
-        },
-        {
-          zeroForOne: SWAP_CONFIG.zeroForOne,
+          zeroForOne,
           amountSpecified,
-          sqrtPriceLimitX96: BigInt(
-            SWAP_CONFIG.sqrtPriceLimitX96,
-          ),
+          sqrtPriceLimitX96: BigInt(sqrtPriceLimitX96),
         },
         hookData,
         payer,
@@ -792,6 +1156,7 @@ function App() {
           chainPolicy.nonce
         } · Max Loss ${chainPolicy.maxLoss.toString()} · Max Fee ${
           chainPolicy.maxFee.toString()
+        } · Minimum Output ${chainPolicy.minAmountOut.toString()
         } · ${consumed ? "CONSUMED" : "ACTIVE"}`,
       );
     } catch (error) {
@@ -819,6 +1184,13 @@ function App() {
 
   useEffect(() => {
     loadProtocol();
+    void inspectProtectedPool();
+    void verifyBackendPoolConfiguration();
+    const interval = window.setInterval(() => {
+      void inspectProtectedPool();
+      void verifyBackendPoolConfiguration();
+    }, 10_000);
+    return () => window.clearInterval(interval);
   }, []);
 
   return (
@@ -849,7 +1221,7 @@ function App() {
         <span>{status}</span>
 
         <span className="chain">
-          Chain {CHAIN_ID}
+          Ethereum Sepolia (test network) · Chain {CHAIN_ID}
         </span>
       </section>
 
@@ -868,7 +1240,7 @@ function App() {
 
           <div className="row">
             <span>Balance</span>
-            <strong>{balance} ETH</strong>
+            <strong>{balance} Sepolia test ETH</strong>
           </div>
         </div>
 
@@ -934,39 +1306,226 @@ function App() {
             <h2>Protected Swap</h2>
 
             <p className="muted">
-              The backend calculates risk and signs the
-              policy. Your connected wallet registers it,
-              approves the input token if needed, and pays
-              gas for the protected swap.
+              {SEPOLIA_DEMO_MODE
+                ? "Demo mode uses a fixed illustrative conversion, not a market quote. Transactions still execute against the Sepolia pool."
+                : "Enter a Sepolia test-network amount. ETH is represented as WETH for ERC-20 pool execution; test ETH and test USDC have no implied real-world value. A genuine protected-pool quote is required for execution."}
             </p>
           </div>
 
           <span className="live-badge">
-            WALLET-PAID EXECUTION
+            {SEPOLIA_DEMO_MODE
+              ? "LOCAL DEMO · SEPOLIA TESTNET"
+              : "SEPOLIA TESTNET · NOT READY"}
           </span>
+        </div>
+
+        {SEPOLIA_DEMO_MODE && (
+          <p className="warning demo-warning" role="alert">
+            DEMO ONLY: display estimate assumes {DEMO_USDC_PER_WETH.toString()} USDC per WETH; it is not a pool quote. The signed minimum is only 1 smallest output-token unit, so it provides no meaningful slippage protection. Use Sepolia test tokens only.
+          </p>
+        )}
+
+        <div className="swap-inputs">
+          <label>
+            You pay · {SWAP_TOKENS[inputToken].displayName}
+            <div className="swap-input-row">
+              <input
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder={`Amount in ${SWAP_TOKENS[inputToken].poolSymbol}`}
+                value={inputAmount}
+                onChange={(event) => {
+                  setInputAmount(event.target.value);
+                  setPolicy(null);
+                  setPolicyId("");
+                  setExecution(null);
+                  setActionStatus(
+                    SEPOLIA_DEMO_MODE
+                      ? "Input changed. Recheck risk before creating a demo policy."
+                      : "Input changed. A fresh quote and risk check are required.",
+                  );
+                }}
+                aria-label={`Amount to pay in ${SWAP_TOKENS[inputToken].poolSymbol}`}
+              />
+              <select
+                value={inputToken}
+                onChange={(event) => {
+                  const nextToken = event.target.value as TokenSymbol;
+                  if (nextToken === outputToken) return;
+                  setInputToken(nextToken);
+                  setInputAmount("");
+                  setPolicy(null);
+                  setPolicyId("");
+                  setExecution(null);
+                  setActionStatus(
+                    SEPOLIA_DEMO_MODE
+                      ? "Token changed. Recheck risk before creating a demo policy."
+                      : "Token changed. A fresh quote and risk check are required.",
+                  );
+                }}
+                aria-label="Token to pay"
+              >
+                <option value="ETH" disabled={outputToken === "ETH"}>
+                  ETH (Sepolia)
+                </option>
+                <option value="USDC" disabled={outputToken === "USDC"}>
+                  USDC (Sepolia)
+                </option>
+              </select>
+            </div>
+          </label>
+          <button
+            className="swap-direction"
+            type="button"
+            onClick={() => {
+              setInputToken(outputToken);
+              setOutputToken(inputToken);
+              setInputAmount("");
+              setPolicy(null);
+              setPolicyId("");
+              setExecution(null);
+              setActionStatus(
+                SEPOLIA_DEMO_MODE
+                  ? "Direction changed. Recheck risk before creating a demo policy."
+                  : "Direction changed. A fresh quote and risk check are required.",
+              );
+            }}
+          >
+            Switch direction · {routeDirection}
+          </button>
+          <label>
+            You receive · {SWAP_TOKENS[outputToken].displayName}
+            <div className="swap-input-row">
+              <input
+                readOnly
+                type="text"
+                value={
+                  SEPOLIA_DEMO_MODE && demoEstimateBaseUnits !== null
+                    ? formatUnits(
+                        demoEstimateBaseUnits,
+                        SWAP_TOKENS[outputToken].decimals,
+                      )
+                    : quoteIsFresh && protectedQuote.status === "available"
+                    ? formatUnits(
+                        protectedQuote.amountOutBaseUnits,
+                        SWAP_TOKENS[outputToken].decimals,
+                      )
+                    : ""
+                }
+                placeholder={
+                  SEPOLIA_DEMO_MODE
+                    ? `Demo estimate unavailable (${SWAP_TOKENS[outputToken].poolSymbol})`
+                    : `Quote unavailable (${SWAP_TOKENS[outputToken].poolSymbol})`
+                }
+                aria-label={`${SEPOLIA_DEMO_MODE ? "Demo estimated" : "Quoted"} output amount in ${SWAP_TOKENS[outputToken].poolSymbol}`}
+              />
+              <select
+                value={outputToken}
+                onChange={(event) => {
+                  const nextToken = event.target.value as TokenSymbol;
+                  if (nextToken === inputToken) return;
+                  setOutputToken(nextToken);
+                  setPolicy(null);
+                  setPolicyId("");
+                  setExecution(null);
+                  setActionStatus("Token changed. A fresh quote and risk check are required.");
+                }}
+                aria-label="Token to receive"
+              >
+                <option value="ETH" disabled={inputToken === "ETH"}>
+                  ETH (Sepolia)
+                </option>
+                <option value="USDC" disabled={inputToken === "USDC"}>
+                  USDC (Sepolia)
+                </option>
+              </select>
+            </div>
+          </label>
+          {!SEPOLIA_DEMO_MODE && (
+            <label>
+              Slippage tolerance (basis points)
+              <input
+                type="number"
+                min="0"
+                max="9999"
+                step="1"
+                value={slippageBps}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setSlippageBps(next);
+                  setPolicy(null);
+                  setPolicyId("");
+                  setExecution(null);
+                }}
+                aria-label="Slippage tolerance in basis points"
+              />
+            </label>
+          )}
+          <p className="amount-conversion">
+            Minimum output:{" "}
+            {SEPOLIA_DEMO_MODE
+              ? `${formatUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (1 base unit; demo floor)`
+              : quoteIsFresh && protectedQuote.status === "available"
+              ? (() => {
+                  const minimum = calculateMinimumOutput(
+                    protectedQuote.amountOutBaseUnits,
+                    slippageBps,
+                  );
+                  return minimum === null
+                    ? "invalid slippage or quote"
+                    : `${formatUnits(minimum, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol}`;
+                })()
+              : "unavailable until a genuine fresh quote exists"}
+          </p>
+          {inputAmount !== "" &&
+            (inputAmountBaseUnits === null || inputAmountBaseUnits === 0n) && (
+            <p className="warning" role="alert">
+              Enter a positive decimal amount with no more than {SWAP_TOKENS[inputToken].decimals} decimal places.
+            </p>
+            )}
+          {inputAmountBaseUnits !== null && inputAmountBaseUnits > 0n && (
+            <p className="amount-conversion">
+              {formatUnits(inputAmountBaseUnits, SWAP_TOKENS[inputToken].decimals)}{" "}
+              {SWAP_TOKENS[inputToken].poolSymbol} = {inputAmountBaseUnits.toString()} base units
+            </p>
+          )}
+          <p className="warning" role="status">
+            {SEPOLIA_DEMO_MODE
+              ? `Illustrative estimate only (${DEMO_USDC_PER_WETH.toString()} USDC/WETH fixed rate); the minimum output does not come from this estimate.`
+              : quoteIsFresh && protectedQuote.status === "available"
+              ? "A fresh quote is available for the exact protected pool; execution still requires all readiness checks."
+              : `Protected-pool quote unavailable: ${(protectedQuote.status === "available" ? "stale quote" : protectedQuote.reason.replaceAll("-", " "))}. No output, slippage, or policy bounds are estimated.`}
+          </p>
         </div>
 
         <div className="swap-summary">
           <div>
-            <span>Pool</span>
-            <code>{shortAddress(SWAP_CONFIG.poolId)}</code>
+            <span>
+              {SEPOLIA_DEMO_MODE
+                ? "Output · demo estimate only (not a quote)"
+                : `Protected pool state · ${quoteIsFresh ? "quote available" : protectedQuote.status === "available" ? "stale quote" : protectedQuote.reason.replaceAll("-", " ")}`}
+            </span>
+            <code>{shortAddress(SWAP_POOL_ID)}</code>
           </div>
 
           <div>
-            <span>Direction</span>
-            <strong>Token0 → Token1</strong>
+            <span>Pool tokens</span>
+            <strong>USDC / WETH · 6 / 18 decimals</strong>
           </div>
 
           <div>
-            <span>Amount</span>
-            <strong>
-              {SWAP_CONFIG.amountSpecified}
-            </strong>
+            <span>Derived pool direction</span>
+            <strong>{routeDirection}</strong>
           </div>
 
           <div>
             <span>Execution</span>
-            <strong>MEVShieldRouter</strong>
+            <strong>
+              {swapReadiness.canExecute
+                ? "All readiness checks passed"
+                : `Disabled · ${swapReadiness.reasons.join(" ")}`}
+            </strong>
           </div>
         </div>
 
@@ -981,9 +1540,9 @@ function App() {
                 <button
                   className="primary"
                   onClick={restoreExistingPoolPath}
-                  disabled={isCreatingPolicy || isExecuting}
+                  disabled={true}
                 >
-                  Restore Existing Pool Path
+                  Restore Existing Pool Path (disabled)
                 </button>
               ) : (
                 <p className="warning">
@@ -994,17 +1553,62 @@ function App() {
           )}
 
         <button
-          className="primary"
-          onClick={createPolicy}
-          disabled={
-            isCreatingPolicy ||
-            isExecuting
-          }
-        >
-          {isCreatingPolicy
-            ? "Calculating Risk..."
-            : "Check Swap Risk"}
-        </button>
+  className="primary"
+  onClick={previewRisk}
+  disabled={
+    inputAmountBaseUnits === null ||
+    inputAmountBaseUnits <= 0n ||
+    zeroForOne === null ||
+    isPreviewingRisk ||
+    isCreatingPolicy ||
+    isExecuting
+  }
+>
+  {isPreviewingRisk ? "Calculating Risk..." : "Check Swap Risk"}
+</button>
+<button
+  className="primary"
+  onClick={createPolicy}
+  disabled={!swapReadiness.canCheckRisk || isCreatingPolicy || isExecuting || isPreviewingRisk}
+>
+  {isCreatingPolicy
+    ? "Creating Policy..."
+    : SEPOLIA_DEMO_MODE
+      ? "Create Demo Policy"
+      : "Create Protected Policy"}
+</button>
+{riskPreview &&
+  riskPreview.requestedAmount === (inputAmountBaseUnits?.toString() ?? "") &&
+  riskPreview.inputToken === inputToken &&
+  riskPreview.outputToken === outputToken &&
+  riskPreview.zeroForOne === zeroForOne && (
+    <section className="risk-panel">
+      <div className="risk-header">
+        <h3>Risk Preview (MVP)</h3>
+        <strong>{riskPreview.riskLevel}</strong>
+      </div>
+      <div className="risk-grid">
+        <div className="metric">
+          <span>Estimated Loss</span>
+          <strong>{formatUnits(BigInt(riskPreview.estimatedLoss), SWAP_TOKENS[inputToken].decimals)} {SWAP_TOKENS[inputToken].poolSymbol}</strong>
+        </div>
+        <div className="metric">
+          <span>Maximum Loss Bound</span>
+          <strong>{formatUnits(BigInt(riskPreview.maxLoss), SWAP_TOKENS[inputToken].decimals)} {SWAP_TOKENS[inputToken].poolSymbol}</strong>
+        </div>
+        <div className="metric">
+          <span>Estimated Fee</span>
+          <strong>{formatUnits(BigInt(riskPreview.estimatedFee), SWAP_TOKENS[inputToken].decimals)} {SWAP_TOKENS[inputToken].poolSymbol}</strong>
+        </div>
+        <div className="metric">
+          <span>Maximum Fee Bound</span>
+          <strong>{formatUnits(BigInt(riskPreview.maxFee), SWAP_TOKENS[inputToken].decimals)} {SWAP_TOKENS[inputToken].poolSymbol}</strong>
+        </div>
+      </div>
+      <p>{riskPreview.disclaimer}</p>
+    </section>
+  )}
+
 
         <p className="action-status">
           {actionStatus}
@@ -1032,8 +1636,8 @@ function App() {
 
             <div className="risk-grid">
               <Metric
-                label="Expected Loss"
-                value={policy.actualLoss}
+                label="Estimated Loss (model)"
+                value={policy.estimatedLoss}
               />
 
               <Metric
@@ -1042,13 +1646,21 @@ function App() {
               />
 
               <Metric
-                label="Expected Fee"
-                value={policy.actualFee}
+                label="Estimated Fee (model)"
+                value={policy.estimatedFee}
               />
 
               <Metric
                 label="Maximum Fee"
                 value={policy.policy.maxFee}
+              />
+              <Metric
+                label={
+                  SEPOLIA_DEMO_MODE
+                    ? "Signed Minimum Output (demo floor)"
+                    : "Signed Minimum Output"
+                }
+                value={policy.policy.minAmountOut}
               />
             </div>
 
@@ -1085,14 +1697,14 @@ function App() {
               className="primary execute-button"
               onClick={executeProtectedSwap}
               disabled={
-                !policy.registered ||
-                deployment.authorization?.toLowerCase() !==
-                  deployment.authorizedConsumer?.toLowerCase() ||
-                isExecuting
+                !swapReadiness.canExecute ||
+                !policy?.registered ||
+                isExecuting ||
+                isCreatingPolicy
               }
             >
-              {isExecuting
-                ? "Executing..."
+              {SEPOLIA_DEMO_MODE
+                ? "Execute Demo Protected Swap"
                 : "Execute Protected Swap"}
             </button>
           </div>

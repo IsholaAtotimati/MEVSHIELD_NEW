@@ -9,6 +9,7 @@ contract PolicyRegistry {
         uint256 expiry;
         uint256 maxLoss;
         uint256 maxFee;
+        uint256 minAmountOut;
     }
 
     address public owner;
@@ -39,7 +40,8 @@ contract PolicyRegistry {
         uint256 nonce,
         uint256 expiry,
         uint256 maxLoss,
-        uint256 maxFee
+        uint256 maxFee,
+        uint256 minAmountOut
     );
 
     event AuthorizedConsumerUpdated(address indexed oldConsumer, address indexed newConsumer);
@@ -97,7 +99,8 @@ contract PolicyRegistry {
         uint256 nonce,
         uint256 expiry,
         uint256 maxLoss,
-        uint256 maxFee
+        uint256 maxFee,
+        uint256 minAmountOut
     ) external onlyAuthorizedRegistrar returns (bytes32 policyId) {
         if (poolId == bytes32(0)) {
             revert InvalidPool();
@@ -117,12 +120,19 @@ contract PolicyRegistry {
 
         policyId = keccak256(abi.encode(poolId, trader, nonce));
 
-        policies[policyId] =
-            Policy({poolId: poolId, trader: trader, nonce: nonce, expiry: expiry, maxLoss: maxLoss, maxFee: maxFee});
+        policies[policyId] = Policy({
+            poolId: poolId,
+            trader: trader,
+            nonce: nonce,
+            expiry: expiry,
+            maxLoss: maxLoss,
+            maxFee: maxFee,
+            minAmountOut: minAmountOut
+        });
 
         registeredNonces[trader][nonce] = true;
 
-        emit PolicyRegistered(policyId, poolId, trader, nonce, expiry, maxLoss, maxFee);
+        emit PolicyRegistered(policyId, poolId, trader, nonce, expiry, maxLoss, maxFee, minAmountOut);
     }
 
     function getPolicy(bytes32 policyId) external view returns (Policy memory) {

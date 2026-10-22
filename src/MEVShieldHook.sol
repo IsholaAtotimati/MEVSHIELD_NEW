@@ -18,9 +18,9 @@ import {PolicyVerifier} from "./PolicyVerifier.sol";
 /// - pool binding
 /// - trader binding
 /// - expiry enforcement
-/// - maxLoss / maxFee enforcement
+/// - signed maxLoss / maxFee enforcement against off-chain estimates
 ///
-/// Risk calculation remains off-chain.
+/// Risk calculation remains off-chain; the hook does not independently measure realized loss or fees.
 /// This contract is the on-chain enforcement boundary.
 contract MEVShieldHook is IHooks {
     IPoolManager public immutable poolManager;
@@ -47,6 +47,7 @@ contract MEVShieldHook is IHooks {
         bool zeroForOne;
         int256 amountSpecified;
         uint160 sqrtPriceLimitX96;
+        uint256 minAmountOut;
     }
 
     error HookNotImplemented();
@@ -58,6 +59,7 @@ contract MEVShieldHook is IHooks {
     error SwapMismatch();
     error MaxLossExceeded();
     error MaxFeeExceeded();
+    error InvalidMinimumOutput();
 
     event SwapPolicyEnforced(
         bytes32 indexed poolId, address indexed trader, uint256 nonce, uint256 maxLoss, uint256 maxFee
@@ -87,7 +89,7 @@ contract MEVShieldHook is IHooks {
             revert InvalidPool();
         }
 
-        (Policy memory policy, bytes memory signature, uint256 actualLoss, uint256 actualFee) =
+        (Policy memory policy, bytes memory signature, uint256 estimatedLoss, uint256 estimatedFee) =
             abi.decode(hookData, (Policy, bytes, uint256, uint256));
 
         if (policy.poolId != actualPoolId) {
@@ -109,12 +111,15 @@ contract MEVShieldHook is IHooks {
             revert PolicyExpired();
         }
 
-        if (actualLoss > policy.maxLoss) {
+        if (estimatedLoss > policy.maxLoss) {
             revert MaxLossExceeded();
         }
 
-        if (actualFee > policy.maxFee) {
+        if (estimatedFee > policy.maxFee) {
             revert MaxFeeExceeded();
+        }
+        if (policy.minAmountOut == 0) {
+            revert InvalidMinimumOutput();
         }
 
         // Cryptographically authorize the policy and consume it.
@@ -138,7 +143,8 @@ contract MEVShieldHook is IHooks {
                 maxFee: policy.maxFee,
                 zeroForOne: policy.zeroForOne,
                 amountSpecified: policy.amountSpecified,
-                sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+                sqrtPriceLimitX96: policy.sqrtPriceLimitX96,
+                minAmountOut: policy.minAmountOut
             }),
             signature
         );

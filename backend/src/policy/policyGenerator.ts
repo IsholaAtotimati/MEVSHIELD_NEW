@@ -9,12 +9,13 @@ export interface PolicyRequest {
   amountSpecified: bigint;
   zeroForOne: boolean;
   sqrtPriceLimitX96: bigint;
+  minAmountOut: bigint;
 }
 
 export function generatePolicy(request: PolicyRequest): {
   policy: Policy;
-  actualLoss: bigint;
-  actualFee: bigint;
+  estimatedLoss: bigint;
+  estimatedFee: bigint;
   riskLevel: "LOW" | "MEDIUM" | "HIGH";
 } {
   const risk = calculateRisk({
@@ -31,13 +32,14 @@ export function generatePolicy(request: PolicyRequest): {
     maxFee: risk.maxFee,
     zeroForOne: request.zeroForOne,
     amountSpecified: request.amountSpecified,
-    sqrtPriceLimitX96: request.sqrtPriceLimitX96
+    sqrtPriceLimitX96: request.sqrtPriceLimitX96,
+    minAmountOut: request.minAmountOut
   };
 
   return {
     policy,
-    actualLoss: risk.actualLoss,
-    actualFee: risk.actualFee,
+    estimatedLoss: risk.estimatedLoss,
+    estimatedFee: risk.estimatedFee,
     riskLevel: risk.riskLevel
   };
 }

@@ -4,8 +4,8 @@ export interface SwapRiskInput {
 }
 
 export interface RiskResult {
-  actualLoss: bigint;
-  actualFee: bigint;
+  estimatedLoss: bigint;
+  estimatedFee: bigint;
   maxLoss: bigint;
   maxFee: bigint;
   riskLevel: "LOW" | "MEDIUM" | "HIGH";
@@ -22,6 +22,7 @@ export function calculateRisk(input: SwapRiskInput): RiskResult {
    *
    * This is intentionally deterministic.
    * No AI and no randomness.
+   * Its loss and fee values are estimates, not observed swap outcomes.
    *
    * The real production engine can later incorporate:
    * - price impact
@@ -32,18 +33,18 @@ export function calculateRisk(input: SwapRiskInput): RiskResult {
    * - MEV exposure
    */
 
-  const actualLoss = absoluteAmount / 1000n;
-  const actualFee = absoluteAmount / 10000n;
+  const estimatedLoss = absoluteAmount / 1000n;
+  const estimatedFee = absoluteAmount / 10000n;
 
-  const maxLoss = actualLoss * 2n;
-  const maxFee = actualFee * 2n;
+  const maxLoss = estimatedLoss * 2n;
+  const maxFee = estimatedFee * 2n;
 
   // Current MVP loss model is fixed at 0.1% of absolute trade size.
   // Risk thresholds are expressed as loss in basis points.
   const lossBps =
     absoluteAmount === 0n
       ? 0n
-      : (actualLoss * 10_000n) / absoluteAmount;
+      : (estimatedLoss * 10_000n) / absoluteAmount;
 
   let riskLevel: RiskResult["riskLevel"];
 
@@ -56,8 +57,8 @@ export function calculateRisk(input: SwapRiskInput): RiskResult {
   }
 
   return {
-    actualLoss,
-    actualFee,
+    estimatedLoss,
+    estimatedFee,
     maxLoss,
     maxFee,
     riskLevel
