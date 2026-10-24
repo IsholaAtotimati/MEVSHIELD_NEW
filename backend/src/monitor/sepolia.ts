@@ -91,13 +91,13 @@ export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
   if (!isAddress(registryAddress) || !isAddress(hookAddress)) {
     throw new Error("Sepolia monitor contract addresses are invalid");
   }
+  if (routerAddress && !isAddress(routerAddress)) {
+    throw new Error("Sepolia monitor router address is invalid");
+  }
 
   const registry = getAddress(registryAddress);
   const hook = getAddress(hookAddress);
-  const router =
-    routerAddress && isAddress(routerAddress)
-      ? getAddress(routerAddress)
-      : undefined;
+  const router = routerAddress ? getAddress(routerAddress) : undefined;
 
   const provider = new JsonRpcProvider(rpcUrl, CHAIN_ID, {
     staticNetwork: true,
@@ -240,15 +240,18 @@ export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
 
     pollRunning = true;
     try {
-      const latestBlock = await provider.getBlockNumber();
-      if (!hasConnected || status === "error") {
-        const network = await provider.getNetwork();
-        if (network.chainId !== BigInt(CHAIN_ID)) {
-          throw new Error(
-            `Sepolia monitor connected to unexpected chain ${network.chainId}`,
-          );
-        }
+      const actualChainId = BigInt(await provider.send("eth_chainId", []));
+      if (actualChainId !== BigInt(CHAIN_ID)) {
+        updateStatus("error");
+        logEvent("error", "sepolia_monitor_wrong_chain", {
+          expectedChainId: CHAIN_ID,
+          actualChainId: actualChainId.toString(),
+        });
+        stop();
+        return;
       }
+
+      const latestBlock = await provider.getBlockNumber();
 
       if (!hasConnected) {
         hasConnected = true;

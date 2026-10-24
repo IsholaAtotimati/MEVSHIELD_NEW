@@ -52,6 +52,9 @@ import {
 } from "./lib/protectedQuote";
 
 import "./App.css";
+import Metric from "./components/Metric";
+import AddressRow from "./components/AddressRow";
+import SwapInputs from "./components/SwapInputs";
 
 const BACKEND_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -1193,6 +1196,21 @@ function App() {
     return () => window.clearInterval(interval);
   }, []);
 
+
+  function switchSwapDirection() {
+    setInputToken(outputToken);
+    setOutputToken(inputToken);
+    setInputAmount("");
+    setPolicy(null);
+    setPolicyId("");
+    setExecution(null);
+    setActionStatus(
+      SEPOLIA_DEMO_MODE
+        ? "Direction changed. Recheck risk before creating a demo policy."
+        : "Direction changed. A fresh quote and risk check are required.",
+    );
+  }
+
   return (
     <main className="app">
       <section className="hero">
@@ -1325,123 +1343,51 @@ function App() {
           </p>
         )}
 
+        <SwapInputs
+          inputToken={inputToken}
+          outputToken={outputToken}
+          inputAmount={inputAmount}
+          swapTokens={SWAP_TOKENS}
+          demoMode={SEPOLIA_DEMO_MODE}
+          demoEstimateBaseUnits={demoEstimateBaseUnits}
+          quoteIsFresh={quoteIsFresh}
+          protectedQuote={protectedQuote}
+          routeDirection={routeDirection}
+          onInputAmountChange={(value) => {
+            setInputAmount(value);
+            setPolicy(null);
+            setPolicyId("");
+            setExecution(null);
+            setActionStatus(
+              SEPOLIA_DEMO_MODE
+                ? "Input changed. Recheck risk before creating a demo policy."
+                : "Input changed. A fresh quote and risk check are required.",
+            );
+          }}
+          onInputTokenChange={(nextToken) => {
+            if (nextToken === outputToken) return;
+            setInputToken(nextToken);
+            setInputAmount("");
+            setPolicy(null);
+            setPolicyId("");
+            setExecution(null);
+            setActionStatus(
+              SEPOLIA_DEMO_MODE
+                ? "Token changed. Recheck risk before creating a demo policy."
+                : "Token changed. A fresh quote and risk check are required.",
+            );
+          }}
+          onOutputTokenChange={(nextToken) => {
+            if (nextToken === inputToken) return;
+            setOutputToken(nextToken);
+            setPolicy(null);
+            setPolicyId("");
+            setExecution(null);
+            setActionStatus("Token changed. A fresh quote and risk check are required.");
+          }}
+          onSwitchDirection={switchSwapDirection}
+        />
         <div className="swap-inputs">
-          <label>
-            You pay · {SWAP_TOKENS[inputToken].displayName}
-            <div className="swap-input-row">
-              <input
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder={`Amount in ${SWAP_TOKENS[inputToken].poolSymbol}`}
-                value={inputAmount}
-                onChange={(event) => {
-                  setInputAmount(event.target.value);
-                  setPolicy(null);
-                  setPolicyId("");
-                  setExecution(null);
-                  setActionStatus(
-                    SEPOLIA_DEMO_MODE
-                      ? "Input changed. Recheck risk before creating a demo policy."
-                      : "Input changed. A fresh quote and risk check are required.",
-                  );
-                }}
-                aria-label={`Amount to pay in ${SWAP_TOKENS[inputToken].poolSymbol}`}
-              />
-              <select
-                value={inputToken}
-                onChange={(event) => {
-                  const nextToken = event.target.value as TokenSymbol;
-                  if (nextToken === outputToken) return;
-                  setInputToken(nextToken);
-                  setInputAmount("");
-                  setPolicy(null);
-                  setPolicyId("");
-                  setExecution(null);
-                  setActionStatus(
-                    SEPOLIA_DEMO_MODE
-                      ? "Token changed. Recheck risk before creating a demo policy."
-                      : "Token changed. A fresh quote and risk check are required.",
-                  );
-                }}
-                aria-label="Token to pay"
-              >
-                <option value="ETH" disabled={outputToken === "ETH"}>
-                  ETH (Sepolia)
-                </option>
-                <option value="USDC" disabled={outputToken === "USDC"}>
-                  USDC (Sepolia)
-                </option>
-              </select>
-            </div>
-          </label>
-          <button
-            className="swap-direction"
-            type="button"
-            onClick={() => {
-              setInputToken(outputToken);
-              setOutputToken(inputToken);
-              setInputAmount("");
-              setPolicy(null);
-              setPolicyId("");
-              setExecution(null);
-              setActionStatus(
-                SEPOLIA_DEMO_MODE
-                  ? "Direction changed. Recheck risk before creating a demo policy."
-                  : "Direction changed. A fresh quote and risk check are required.",
-              );
-            }}
-          >
-            Switch direction · {routeDirection}
-          </button>
-          <label>
-            You receive · {SWAP_TOKENS[outputToken].displayName}
-            <div className="swap-input-row">
-              <input
-                readOnly
-                type="text"
-                value={
-                  SEPOLIA_DEMO_MODE && demoEstimateBaseUnits !== null
-                    ? formatUnits(
-                        demoEstimateBaseUnits,
-                        SWAP_TOKENS[outputToken].decimals,
-                      )
-                    : quoteIsFresh && protectedQuote.status === "available"
-                    ? formatUnits(
-                        protectedQuote.amountOutBaseUnits,
-                        SWAP_TOKENS[outputToken].decimals,
-                      )
-                    : ""
-                }
-                placeholder={
-                  SEPOLIA_DEMO_MODE
-                    ? `Demo estimate unavailable (${SWAP_TOKENS[outputToken].poolSymbol})`
-                    : `Quote unavailable (${SWAP_TOKENS[outputToken].poolSymbol})`
-                }
-                aria-label={`${SEPOLIA_DEMO_MODE ? "Demo estimated" : "Quoted"} output amount in ${SWAP_TOKENS[outputToken].poolSymbol}`}
-              />
-              <select
-                value={outputToken}
-                onChange={(event) => {
-                  const nextToken = event.target.value as TokenSymbol;
-                  if (nextToken === inputToken) return;
-                  setOutputToken(nextToken);
-                  setPolicy(null);
-                  setPolicyId("");
-                  setExecution(null);
-                  setActionStatus("Token changed. A fresh quote and risk check are required.");
-                }}
-                aria-label="Token to receive"
-              >
-                <option value="ETH" disabled={inputToken === "ETH"}>
-                  ETH (Sepolia)
-                </option>
-                <option value="USDC" disabled={inputToken === "USDC"}>
-                  USDC (Sepolia)
-                </option>
-              </select>
-            </div>
-          </label>
           {!SEPOLIA_DEMO_MODE && (
             <label>
               Slippage tolerance (basis points)
@@ -1807,37 +1753,6 @@ function App() {
   );
 }
 
-function Metric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
 
-function AddressRow({
-  name,
-  address,
-}: {
-  name: string;
-  address: Address | null;
-}) {
-  return (
-    <div className="address-row">
-      <span>{name}</span>
-
-      <code>
-        {address ?? "Loading..."}
-      </code>
-    </div>
-  );
-}
 
 export default App;

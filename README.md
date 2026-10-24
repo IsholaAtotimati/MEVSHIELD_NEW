@@ -515,6 +515,33 @@ Before enabling protected execution on a deployed network, verify:
 7. Settlement and token balances behave as expected.
 8. End-to-end tests pass against a suitable, independently verified test environment.
 
+### Read-only current Sepolia pool initialization plan
+
+`script/PlanCurrentSepoliaPoolInitialization.s.sol` validates the approved current Sepolia pool key, confirms that the hook points to the expected PoolManager, and prints the initialization calldata without sending it. It requires an explicit `POOL_INITIAL_SQRT_PRICE_X96` value; it does not select a price or create a liquidity plan.
+
+Run it against an approved Sepolia RPC endpoint without `--broadcast`:
+
+```bash
+POOL_INITIAL_SQRT_PRICE_X96=<owner-approved-integer> \
+forge script script/PlanCurrentSepoliaPoolInitialization.s.sol:PlanCurrentSepoliaPoolInitialization \
+  --rpc-url "$SEPOLIA_RPC_URL"
+```
+
+For currency0 USDC (6 decimals) and currency1 WETH (18 decimals), Uniswap v4 interprets the pool price as the raw-unit ratio:
+
+```text
+raw WETH per USDC = (sqrtPriceX96 / 2^96)^2
+human WETH per USDC = raw WETH per USDC * 10^(6 - 18)
+                    = raw WETH per USDC / 10^12
+human USDC per WETH = 1 / human WETH per USDC
+```
+
+Independently calculate from the exact integer `sqrtPriceX96` using arbitrary-precision arithmetic, then compare the human-unit quote to an owner-approved independent reference price and verify the quote direction. Do not infer a price from the pool ID or old scripts.
+
+The initialization tick is obtained from `TickMath.getTickAtSqrtPrice(sqrtPriceX96)`. A later liquidity range must be chosen explicitly: both boundaries must be multiples of the pool's 60-tick spacing, with `tickLower <= currentTick < tickUpper`. For negative ticks, round the lower boundary down toward negative infinity, not toward zero; then select an upper multiple strictly greater than the current tick. Range width and liquidity are owner decisions and are not inferred by this plan.
+
+Do not prepare a liquidity plan until the LP owner and recipient are supplied and read-only checks confirm their USDC/WETH balances, ERC-20 approvals to Permit2, Permit2 allowances to the PositionManager, and the PositionManager/Permit2 addresses, code presence, and approved code hashes. The initialization planner intentionally does not inspect or print those owner-specific values.
+
 ---
 
 ## Security Model

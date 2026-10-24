@@ -13,37 +13,31 @@ contract InspectCurrentProtectedPool is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
+    uint256 private constant SEPOLIA_CHAIN_ID = 11155111;
+    address private constant HOOK = 0x5446D8C7568fC9bb9e699Ae94CFD47533118C080;
+    bytes32 private constant EXPECTED_POOL_ID = 0xac5918607a0235904ea5157e2e63254350401fb21881136c3c7069db7c0a65f7;
+
     function run() external view {
-        IPoolManager manager =
-            IPoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543);
+        require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain: expected Sepolia");
+
+        IPoolManager manager = IPoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543);
 
         PoolKey memory key = PoolKey({
-            currency0: Currency.wrap(
-                0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
-            ),
-            currency1: Currency.wrap(
-                0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14
-            ),
+            currency0: Currency.wrap(0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238),
+            currency1: Currency.wrap(0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14),
             fee: 3000,
             tickSpacing: 60,
-            hooks: IHooks(
-                0x5446D8C7568fC9bb9e699Ae94CFD47533118C080
-            )
+            hooks: IHooks(HOOK)
         });
 
         PoolId poolId = key.toId();
+        require(PoolId.unwrap(poolId) == EXPECTED_POOL_ID, "Computed pool ID does not match approved current pool");
 
         console2.log("===== CURRENT PROTECTED POOL =====");
+        console2.log("Observed block:", block.number);
         console2.logBytes32(PoolId.unwrap(poolId));
 
-        require(
-            PoolId.unwrap(poolId) ==
-                0xac5918607a0235904ea5157e2e63254350401fb21881136c3c7069db7c0a65f7,
-            "Computed pool ID does not match configured pool"
-        );
-
-        (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee) =
-            manager.getSlot0(poolId);
+        (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee) = manager.getSlot0(poolId);
 
         uint128 liquidity = manager.getLiquidity(poolId);
 
@@ -53,13 +47,7 @@ contract InspectCurrentProtectedPool is Script {
         console2.log("LP fee", uint256(lpFee));
         console2.log("active liquidity", uint256(liquidity));
 
-        console2.log(
-            "INITIALIZED:",
-            sqrtPriceX96 != 0
-        );
-        console2.log(
-            "HAS ACTIVE LIQUIDITY:",
-            liquidity != 0
-        );
+        console2.log("INITIALIZED:", sqrtPriceX96 != 0);
+        console2.log("HAS ACTIVE LIQUIDITY:", liquidity != 0);
     }
 }

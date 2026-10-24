@@ -5,6 +5,7 @@ import { Wallet } from "ethers";
 import {
   EXPECTED_AUTHORIZED_SIGNER,
   EXPECTED_PROTECTED_POOL,
+  EXPECTED_SEPOLIA_ROUTER,
   assertConfiguredPoolId,
   isLocalSepoliaDemoEnabled,
   loadBackendConfig,
@@ -55,8 +56,8 @@ test("local demo signing requires its explicit flag", () => {
 
 function makeBaseEnv() {
   const signerWallet = new Wallet("0x1111111111111111111111111111111111111111111111111111111111111111");
-  const verifierAddress = "0x9C8c0E55894CF126cE62cAE76A02aec85F6c60d8";
-  const routerAddress = "0xE57525678cbf6417F685727b77551316a3De3bba";
+  const verifierAddress = "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f";
+  const routerAddress = FIXTURE_ROUTER_ADDRESS;
 
   return {
     signerWallet,
@@ -75,9 +76,11 @@ function makeBaseEnv() {
   };
 }
 
+const FIXTURE_ROUTER_ADDRESS = "0xE57525678cbf6417F685727b77551316a3De3bba";
+
 test("valid Sepolia config passes", () => {
   const { signerWallet, env } = makeBaseEnv();
-  const config = loadBackendConfig(env, signerWallet.address);
+  const config = loadBackendConfig(env, signerWallet.address, FIXTURE_ROUTER_ADDRESS);
 
   assert.equal(config.chainId, 11155111);
   assert.equal(config.verifierAddress.toLowerCase(), env.POLICY_VERIFIER_ADDRESS.toLowerCase());
@@ -100,6 +103,66 @@ test("valid Sepolia config passes", () => {
   assert.equal(
     config.protectedPool.poolId.toLowerCase(),
     EXPECTED_PROTECTED_POOL.poolId.toLowerCase(),
+  );
+});
+
+test("approved Sepolia router is accepted and normalized by default", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const config = loadBackendConfig({
+    ...env,
+    ROUTER_ADDRESS: EXPECTED_SEPOLIA_ROUTER.toLowerCase(),
+  }, signerWallet.address);
+
+  assert.equal(config.routerAddress, EXPECTED_SEPOLIA_ROUTER);
+});
+
+test("a different syntactically valid router is rejected by default", () => {
+  const { signerWallet, env } = makeBaseEnv();
+
+  assert.throws(
+    () => loadBackendConfig(env, signerWallet.address),
+    /does not match the approved Sepolia router/,
+  );
+});
+
+test("ROUTER_ADDRESS alias accepts the approved router", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const config = loadBackendConfig({
+    ...env,
+    ROUTER_ADDRESS: EXPECTED_SEPOLIA_ROUTER,
+    MEVSHIELD_ROUTER: undefined,
+  }, signerWallet.address);
+
+  assert.equal(config.routerAddress, EXPECTED_SEPOLIA_ROUTER);
+});
+
+test("MEVSHIELD_ROUTER fallback accepts the approved router", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const config = loadBackendConfig({
+    ...env,
+    ROUTER_ADDRESS: undefined,
+    MEVSHIELD_ROUTER: EXPECTED_SEPOLIA_ROUTER,
+  }, signerWallet.address);
+
+  assert.equal(config.routerAddress, EXPECTED_SEPOLIA_ROUTER);
+});
+
+test("ROUTER_ADDRESS keeps precedence over the legacy alias", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const config = loadBackendConfig({
+    ...env,
+    ROUTER_ADDRESS: EXPECTED_SEPOLIA_ROUTER,
+    MEVSHIELD_ROUTER: FIXTURE_ROUTER_ADDRESS,
+  }, signerWallet.address);
+
+  assert.equal(config.routerAddress, EXPECTED_SEPOLIA_ROUTER);
+  assert.throws(
+    () => loadBackendConfig({
+      ...env,
+      ROUTER_ADDRESS: FIXTURE_ROUTER_ADDRESS,
+      MEVSHIELD_ROUTER: EXPECTED_SEPOLIA_ROUTER,
+    }, signerWallet.address),
+    /does not match the approved Sepolia router/,
   );
 });
 
@@ -197,7 +260,7 @@ test("malformed verifier address is rejected", () => {
   const invalidEnv = { ...env, POLICY_VERIFIER_ADDRESS: "x9DF6c29bD323B61f83f1D3214041bf08f1267544" };
 
   assert.throws(
-    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER),
+    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER, FIXTURE_ROUTER_ADDRESS),
     /Invalid verifier configuration/,
   );
 });
@@ -208,7 +271,7 @@ test("incorrect but syntactically valid verifier address is rejected in producti
   const invalidEnv = { ...env, POLICY_VERIFIER_ADDRESS: otherValid };
 
   assert.throws(
-    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER),
+    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER, FIXTURE_ROUTER_ADDRESS),
     /Expected Sepolia PolicyVerifier/,
   );
 });
@@ -218,7 +281,7 @@ test("incorrect chain ID is rejected in Sepolia production mode", () => {
   const invalidEnv = { ...env, CHAIN_ID: "1" };
 
   assert.throws(
-    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER),
+    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER, FIXTURE_ROUTER_ADDRESS),
     /CHAIN_ID must be 11155111/,
   );
 });
@@ -229,7 +292,7 @@ test("signer mismatch is rejected before signing", () => {
   const invalidEnv = { ...env, SIGNER_PRIVATE_KEY: otherWallet.privateKey };
 
   assert.throws(
-    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER),
+    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER, FIXTURE_ROUTER_ADDRESS),
     /authorized signer/i,
   );
 });
@@ -240,7 +303,7 @@ test("validation errors do not echo the signer private key", () => {
   const invalidEnv = { ...env, SIGNER_PRIVATE_KEY: secretKey };
 
   assert.throws(
-    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER),
+    () => loadBackendConfig(invalidEnv, EXPECTED_AUTHORIZED_SIGNER, FIXTURE_ROUTER_ADDRESS),
     (error: unknown) => {
       const message = String(error);
       return message.includes("authorized signer") && !message.includes(secretKey);

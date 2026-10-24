@@ -79,7 +79,13 @@ contract MEVShieldHookTest is Test {
         MEVShieldHook.Policy memory policy = _policy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -110,9 +116,7 @@ contract MEVShieldHookTest is Test {
 
     function _params() internal pure returns (IPoolManager.SwapParams memory params) {
         params = IPoolManager.SwapParams({
-            zeroForOne: true,
-            amountSpecified: -100e6,
-            sqrtPriceLimitX96: 79228162514264337593543950336
+            zeroForOne: true, amountSpecified: -100e6, sqrtPriceLimitX96: 79228162514264337593543950336
         });
     }
 
@@ -121,7 +125,13 @@ contract MEVShieldHookTest is Test {
 
         // Register the exact policy on-chain.
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         // Create the authorized EIP-712 signature.
@@ -154,7 +164,13 @@ contract MEVShieldHookTest is Test {
         MEVShieldHook.Policy memory policy = _policy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -177,7 +193,13 @@ contract MEVShieldHookTest is Test {
         MEVShieldHook.Policy memory policy = _policy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -195,7 +217,13 @@ contract MEVShieldHookTest is Test {
         MEVShieldHook.Policy memory policy = _policy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -264,12 +292,11 @@ contract MEVShieldHookTest is Test {
     }
 
     function test_RevertWhenCallerIsNotPoolManager() public {
-        MEVShieldHook.Policy memory policy = _policy();
-
-        vm.prank(trader);
+        bytes memory hookData = _hookData();
 
         vm.expectRevert(MEVShieldHook.Unauthorized.selector);
+        vm.prank(attacker);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy));
+        hook.beforeSwap(trader, key, _params(), hookData);
     }
 }

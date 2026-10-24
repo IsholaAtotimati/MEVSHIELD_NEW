@@ -53,8 +53,8 @@ contract ApproveSepoliaPermit2 is Script {
     bytes32 private constant PERMIT2_CODE_HASH =
         0x96d9f5c3f0fb0423426b7f970186235b7347027f4e5c19c40c412b7d97fc3751;
 
-    uint160 private constant USDC_AMOUNT = 3_000_000;
-    uint160 private constant WETH_AMOUNT = 1_000_000_000_000_000;
+    uint160 private constant USDC_AMOUNT = 250_000;
+    uint160 private constant WETH_AMOUNT = 150_000_000_000_000;
 
     function run() external {
         require(block.chainid == SEPOLIA_CHAIN_ID, "Wrong chain");

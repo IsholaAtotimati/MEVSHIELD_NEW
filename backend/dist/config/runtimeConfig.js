@@ -1,14 +1,15 @@
 import { AbiCoder, Wallet, getAddress, isAddress, keccak256 } from "ethers";
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const EXPECTED_AUTHORIZED_SIGNER = "0x016B78a30CE176EF0B90c122e8677e13aAB2A815";
-export const EXPECTED_SEPOLIA_VERIFIER = "0x9C8c0E55894CF126cE62cAE76A02aec85F6c60d8";
+export const EXPECTED_SEPOLIA_VERIFIER = "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f";
+export const EXPECTED_SEPOLIA_ROUTER = "0x633282608B2fc66cD7572f5eF58e804063aa150D";
 export const EXPECTED_PROTECTED_POOL = {
     currency0: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
     currency1: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
     fee: 3000,
     tickSpacing: 60,
-    hooks: "0x5446D8C7568fC9bb9e699Ae94CFD47533118C080",
-    poolId: "0xac5918607a0235904ea5157e2e63254350401fb21881136c3c7069db7c0a65f7",
+    hooks: "0xd15e4fdd391a68c2f1c385d1a819117a3ad40080",
+    poolId: "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602",
 };
 const PROTECTED_POOL_KEY_ABI = "tuple(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)";
 function requiredValue(value, name) {
@@ -96,7 +97,7 @@ export function isLocalSepoliaDemoEnabled(env) {
         env.NODE_ENV !== "production" &&
         !env.RAILWAY_ENVIRONMENT_NAME);
 }
-export function loadBackendConfig(env = process.env, expectedSignerAddress = EXPECTED_AUTHORIZED_SIGNER) {
+export function loadBackendConfig(env = process.env, expectedSignerAddress = EXPECTED_AUTHORIZED_SIGNER, expectedRouterAddress = EXPECTED_SEPOLIA_ROUTER) {
     const chainIdValue = Number(firstConfigured(env.CHAIN_ID));
     if (Number.isNaN(chainIdValue)) {
         throw new Error("CHAIN_ID must be set to 11155111 for the Sepolia deployment.");
@@ -132,12 +133,16 @@ export function loadBackendConfig(env = process.env, expectedSignerAddress = EXP
     if (!routerAddress || !isAddress(routerAddress)) {
         throw new Error("MEVSHIELD_ROUTER is not configured or is not a valid address.");
     }
+    const normalizedRouterAddress = getAddress(routerAddress);
+    if (normalizedRouterAddress.toLowerCase() !== expectedRouterAddress.toLowerCase()) {
+        throw new Error(`Configured router does not match the approved Sepolia router ${expectedRouterAddress}.`);
+    }
     return {
         chainId: chainIdValue,
         verifierAddress: getAddress(verifierAddress),
         signerWallet,
         signerAddress: getAddress(signerWallet.address),
-        routerAddress: getAddress(routerAddress),
+        routerAddress: normalizedRouterAddress,
         protectedPool,
     };
 }

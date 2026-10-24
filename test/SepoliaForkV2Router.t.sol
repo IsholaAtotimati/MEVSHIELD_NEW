@@ -16,6 +16,8 @@ import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol"
 import {Currency} from "v4-core/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
 
 import {MEVShieldHook} from "../src/MEVShieldHook.sol";
 import {MEVShieldRouter} from "../src/MEVShieldRouter.sol";
@@ -31,8 +33,6 @@ contract SepoliaForkV2RouterTest is Test {
     uint256 private constant LOCAL_SIGNER_PRIVATE_KEY = 0xA11CE;
     uint256 private constant WETH_INPUT_AMOUNT = 1e15;
     uint256 private constant USDC_INPUT_AMOUNT = 1e6;
-    uint160 private constant MIN_SQRT_PRICE_X96 = 4295128740;
-    uint160 private constant MAX_SQRT_PRICE_X96 = 1461446703485210103287273052203988822378723970341;
 
     address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
@@ -98,7 +98,7 @@ contract SepoliaForkV2RouterTest is Test {
     function test_V2RouterEnforcesMinimumOutputForWethToUsdc() public {
         uint256 minAmountOut = 1;
         MEVShieldHook.Policy memory policy =
-            _registerPolicy(false, -int256(WETH_INPUT_AMOUNT), MAX_SQRT_PRICE_X96 - 1, minAmountOut);
+            _registerPolicy(false, -int256(WETH_INPUT_AMOUNT), _priceLimit(false), minAmountOut);
 
         deal(WETH, address(this), WETH_INPUT_AMOUNT);
         require(IERC20Minimal(WETH).approve(address(router), WETH_INPUT_AMOUNT), "WETH approval failed");
@@ -130,7 +130,7 @@ contract SepoliaForkV2RouterTest is Test {
     function test_V2RouterEnforcesMinimumOutputForUsdcToWeth() public {
         uint256 minAmountOut = 1;
         MEVShieldHook.Policy memory policy =
-            _registerPolicy(true, -int256(USDC_INPUT_AMOUNT), MIN_SQRT_PRICE_X96 + 1, minAmountOut);
+            _registerPolicy(true, -int256(USDC_INPUT_AMOUNT), _priceLimit(true), minAmountOut);
 
         deal(USDC, address(this), USDC_INPUT_AMOUNT);
         require(IERC20Minimal(USDC).approve(address(router), USDC_INPUT_AMOUNT), "USDC approval failed");
@@ -161,7 +161,7 @@ contract SepoliaForkV2RouterTest is Test {
 
     function test_V2RouterEnforcesExactMinimumBoundaryAndRollsBackNonce() public {
         uint256 snapshotId = vm.snapshotState();
-        uint160 priceLimit = MAX_SQRT_PRICE_X96 - 1;
+        uint160 priceLimit = _priceLimit(false);
         MEVShieldHook.Policy memory quotePolicy = _registerPolicy(false, -int256(WETH_INPUT_AMOUNT), priceLimit, 1);
         deal(WETH, address(this), WETH_INPUT_AMOUNT);
         require(IERC20Minimal(WETH).approve(address(router), WETH_INPUT_AMOUNT), "WETH quote approval failed");
@@ -226,6 +226,15 @@ contract SepoliaForkV2RouterTest is Test {
 
         console2.log("LOCAL FORK V2 - Exact minimum boundary (micro-USDC):", quotedOutput);
         console2.log("LOCAL FORK V2 - One unit above minimum reverted.");
+    }
+
+    /// @dev Select a price limit 500 ticks from the current fork pool tick.
+    function _priceLimit(bool zeroForOne) private view returns (uint160) {
+        (, int24 currentTick,,) = StateLibrary.getSlot0(manager, poolKey.toId());
+        int24 limitTick = zeroForOne
+            ? currentTick - int24(500)
+            : currentTick + int24(500);
+        return TickMath.getSqrtPriceAtTick(limitTick);
     }
 
     function _registerPolicy(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, uint256 minAmountOut)
