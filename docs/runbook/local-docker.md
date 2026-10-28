@@ -334,6 +334,58 @@ signature. If the EIP-712 domain (`MEVShield` / `1`), the chain id, the verifyin
 contract address, or the signer key were wrong, that call reverts instead of
 returning `true`.
 
+### How the verify script finds the stack
+
+The script reads the same port variables the stack was started with, in the same
+precedence order `script/docker-local-up.sh` uses:
+
+| Source | Wins over |
+| --- | --- |
+| An environment variable set in your shell | everything |
+| `docker/.env.docker` | the built-in defaults |
+| Built-in defaults (8545 / 4000 / 5173) | nothing |
+
+This is the reverse of what an earlier revision did: it had a hard-coded default
+of 8545 / 4000 / 5173 regardless of the file, so a stack moved to other ports
+produced ten `fetch failed` lines instead of a pass.
+
+So if you moved the stack to other ports in `docker/.env.docker`, verify with no
+arguments at all — no environment variables are needed:
+
+```bash
+./script/docker-local-verify.sh
+#   anvil http://127.0.0.1:8645   backend http://localhost:4100   frontend http://localhost:5273
+#   ports from docker/.env.docker
+```
+
+To check a stack on a different port for one run, without editing the file, pass
+the variable explicitly. An explicit value always overrides the file:
+
+```bash
+ANVIL_PORT=8645 BACKEND_PORT=4100 FRONTEND_PORT=5273 ./script/docker-local-verify.sh
+```
+
+The script prints the three URLs it will use before it starts, so a mismatch is
+visible immediately. Each `FAIL` also prints the exact URL it tried.
+
+If anvil does not answer at all, the script stops before the individual checks
+and says so, rather than printing a failure for every layer:
+
+```
+  FAIL  nothing is answering JSON-RPC at http://127.0.0.1:8545
+
+  The stack is probably not running, or it is on different ports than this
+  script expects. Ports came from: no env file; compose defaults
+
+  Fix one of these:
+    start the stack        ./script/docker-local-up.sh
+    use the running ports  ANVIL_PORT=<port> BACKEND_PORT=<port> FRONTEND_PORT=<port> ./script/docker-local-verify.sh
+    record them in the file docker/.env.docker, which compose and this script both read
+```
+
+The script never prints the contents of `docker/.env.docker`, so the development
+keys it may contain are not echoed. Only the three port values are read out of it.
+
 ---
 
 ## 9. Using the app in a browser
@@ -450,9 +502,16 @@ design.
 `docker/.env.docker.example` documents every variable with safe placeholders.
 Copy it to `docker/.env.docker` to override anything; the file is gitignored.
 
-`docker-compose.yml` itself loads `docker/.env.docker` automatically.
-`script/docker-local-up.sh` also sources it and exports the values, which is what
-makes `FRONTEND_URL` and the `VITE_*` URLs consistent.
+Compose itself only auto-loads a `.env` in the project root. `docker/.env.docker`
+is read by `script/docker-local-up.sh`, which sources it and exports `ANVIL_PORT`,
+`BACKEND_PORT`, `FRONTEND_PORT` and the matching `VITE_*` / `FRONTEND_URL` values
+before invoking compose. That is what keeps the published ports and the URLs
+consistent. `script/docker-local-verify.sh` reads the same file for the same
+reason.
+
+If you run `docker compose up` directly rather than through the up script, either
+copy the file to `.env` or export the variables yourself, otherwise compose falls
+back to 8545 / 4000 / 5173.
 
 ### Host ports
 
@@ -641,9 +700,15 @@ verifyPolicy(backend sig):      true
 
 ### Script suite
 
+Run through the env file, with no environment variables set. The stack was on
+8645 / 4100 / 5273, recorded in `docker/.env.docker`:
+
 ```
 $ ./script/docker-local-verify.sh
 MEVShield local stack verification
+
+  anvil http://127.0.0.1:8645   backend http://localhost:4100   frontend http://localhost:5273
+  ports from docker/.env.docker
 
   PASS  anvil eth_chainId is 0x7a69 (31337)
   PASS  contracts-deploy exited 0
@@ -658,6 +723,27 @@ MEVShield local stack verification
   PASS  deployed PolicyVerifier accepts the backend signature
 
   11 passed, 0 failed
+```
+
+An explicit override wins over the file:
+
+```
+$ ANVIL_PORT=9999 ./script/docker-local-verify.sh
+  anvil http://127.0.0.1:9999   backend http://localhost:4100   frontend http://localhost:5273
+  ports from docker/.env.docker
+
+  FAIL  nothing is answering JSON-RPC at http://127.0.0.1:9999
+```
+
+Before the fix, the same run against the same stack reported:
+
+```
+$ ./script/docker-local-verify.sh
+chain_check: fetch failed
+  FAIL  anvil eth_chainId is 0x7a69 (31337)
+  PASS  contracts-deploy exited 0
+...
+  1 passed, 10 failed
 ```
 
 ### Fail-closed checks
