@@ -1,4 +1,5 @@
 import { formatTokenAmount } from "../lib/format";
+import ValueRow from "./ValueRow";
 
 type AllowanceCardProps = {
   symbol: string;
@@ -26,13 +27,9 @@ export default function AllowanceCard({
   return (
     <div className="card">
       <h2>Router allowance ({symbol})</h2>
-      <div className="row">
-        <span>Current allowance</span>
-        <strong>
-          {formatTokenAmount(allowance, decimals)} {symbol}
-        </strong>
-      </div>
-      <label htmlFor={inputId}>
+      <ValueRow label="Current allowance">
+        {formatTokenAmount(allowance, decimals)} {symbol}
+      </ValueRow>      <label htmlFor={inputId}>
         Exact amount to approve ({symbol})
         <input
           id={inputId}

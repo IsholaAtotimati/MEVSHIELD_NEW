@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
 
 import AllowanceCard from "../components/AllowanceCard";
+import ValueRow from "../components/ValueRow";
 import { SWAP_TOKENS, WETH9_ADDRESS } from "../config/swapPool";
 import { useTrade } from "../context/TradeContext";
 import { erc20Abi, weth9Abi } from "../lib/abis";
@@ -204,18 +205,15 @@ export default function PortfolioPage() {
           <div className="grid">
             <div className="card">
               <h2>Balances</h2>
-              <div className="row">
-                <span>ETH (unwrapped)</span>
-                <strong>{formatTokenAmount(ethBalance, 18)}</strong>
-              </div>
-              <div className="row">
-                <span>WETH (used by swaps)</span>
-                <strong>{formatTokenAmount(wethBalance, 18)}</strong>
-              </div>
-              <div className="row">
-                <span>USDC</span>
-                <strong>{formatTokenAmount(usdcBalance, 6)}</strong>
-              </div>
+              <ValueRow label="ETH (unwrapped)">
+                {formatTokenAmount(ethBalance, 18)}
+              </ValueRow>
+              <ValueRow label="WETH (used by swaps)">
+                {formatTokenAmount(wethBalance, 18)}
+              </ValueRow>
+              <ValueRow label="USDC">
+                {formatTokenAmount(usdcBalance, 6)}
+              </ValueRow>
               <button type="button" onClick={() => void refresh()}>
                 Refresh
               </button>

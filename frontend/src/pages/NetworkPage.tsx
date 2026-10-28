@@ -1,4 +1,5 @@
 import AddressRow from "../components/AddressRow";
+import ValueRow from "../components/ValueRow";
 import { useTrade } from "../context/TradeContext";
 import { CONTRACTS } from "../lib/contracts";
 import { etherscanAddressUrl } from "../lib/format";
@@ -89,28 +90,18 @@ export default function NetworkPage() {
         </div>
         <div className="card">
           <h2>Backend</h2>
-          <div className="row">
-            <span>Health</span>
-            <strong>{backend.healthState}</strong>
-          </div>
-          <div className="row">
-            <span>Monitor</span>
-            <strong>{monitor ? monitor.status : "unknown"}</strong>
-          </div>
-          <div className="row">
-            <span>Last checked block</span>
-            <strong>
-              {monitor?.lastCheckedBlock === undefined
-                ? "not reported"
-                : monitor.lastCheckedBlock.toLocaleString()}
-            </strong>
-          </div>
-          <div className="row">
-            <span>Policy signing</span>
-            <strong>
-              {backend.health?.policySigningEnabled ? "enabled" : "disabled"}
-            </strong>
-          </div>
+          <ValueRow label="Health">{backend.healthState}</ValueRow>
+          <ValueRow label="Monitor">
+            {monitor ? monitor.status : "unknown"}
+          </ValueRow>
+          <ValueRow label="Last checked block">
+            {monitor?.lastCheckedBlock === undefined
+              ? "not reported"
+              : monitor.lastCheckedBlock.toLocaleString()}
+          </ValueRow>
+          <ValueRow label="Policy signing">
+            {backend.health?.policySigningEnabled ? "enabled" : "disabled"}
+          </ValueRow>
           <p className="muted" role="status" aria-live="polite">
             {monitor?.lastCheckedBlock === undefined
               ? "The backend has not reported a scanned block yet."
