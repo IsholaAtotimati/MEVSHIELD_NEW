@@ -138,6 +138,8 @@ export function createApp(deps: AppDependencies): Express {
   });
 
   app.post("/policy", async (req, res) => {
+    // Feature gate first: when signing is off, the route is unavailable and we do
+    // not validate policy fields (avoids misleading 400s on a disabled endpoint).
     if (!deps.policySigningEnabled) {
       return res.status(503).json({
         error:

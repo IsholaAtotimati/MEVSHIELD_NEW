@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import test from "node:test";
+import { Wallet } from "ethers";
 
 import {
   EXPECTED_PROTECTED_POOL,
@@ -15,6 +16,35 @@ import { createApp, type AppDependencies } from "./server.js";
 
 function futureExpiry(secondsFromNow = 300): string {
   return String(Math.floor(Date.now() / 1000) + secondsFromNow);
+}
+
+const TEST_SIGNER_WALLET = new Wallet(
+  "0x1111111111111111111111111111111111111111111111111111111111111111",
+);
+
+function validPolicyBody(minAmountOut = "100") {
+  return {
+    poolId: EXPECTED_PROTECTED_POOL.poolId,
+    trader: EXPECTED_SEPOLIA_ROUTER,
+    nonce: "1",
+    expiry: futureExpiry(),
+    amountSpecified: "-1000000",
+    zeroForOne: true,
+    sqrtPriceLimitX96: String(MIN_SQRT_PRICE_LIMIT_X96 + 1n),
+    minAmountOut,
+  };
+}
+
+/** Signing on, local demo off — exercises policy rules after the 503 feature gate. */
+function v2SigningDeps(
+  overrides: Partial<AppDependencies> = {},
+): AppDependencies {
+  return baseDeps({
+    policySigningEnabled: true,
+    localDemoMode: false,
+    signerWallet: TEST_SIGNER_WALLET,
+    ...overrides,
+  });
 }
 
 function baseDeps(
@@ -95,6 +125,18 @@ test("POST /policy returns 503 when signing is disabled", async () => {
   assert.match(String(response.json.error), /Policy signing is disabled/);
 });
 
+test("POST /policy returns 503 when signing is disabled regardless of request body", async () => {
+  const response = await requestJson(
+    createApp(baseDeps({ policySigningEnabled: false, localDemoMode: false })),
+    "POST",
+    "/policy",
+    validPolicyBody("1"),
+  );
+
+  assert.equal(response.status, 503);
+  assert.match(String(response.json.error), /Policy signing is disabled/);
+});
+
 test("POST /policy rejects invalid JSON with 400", async () => {
   const app = createApp(
     baseDeps({
@@ -141,27 +183,12 @@ test("POST /policy validates request bodies before signing", async () => {
   assert.equal(response.json.error, "Invalid request");
 });
 
-test("POST /policy rejects demo minimum output outside local demo mode", async () => {
+test("POST /policy rejects minAmountOut of 1 when signing enabled without local demo", async () => {
   const response = await requestJson(
-    createApp(
-      baseDeps({
-        policySigningEnabled: true,
-        localDemoMode: false,
-        signerWallet: undefined,
-      }),
-    ),
+    createApp(v2SigningDeps()),
     "POST",
     "/policy",
-    {
-      poolId: EXPECTED_PROTECTED_POOL.poolId,
-      trader: EXPECTED_SEPOLIA_ROUTER,
-      nonce: "1",
-      expiry: futureExpiry(),
-      amountSpecified: "-1000000",
-      zeroForOne: true,
-      sqrtPriceLimitX96: String(MIN_SQRT_PRICE_LIMIT_X96 + 1n),
-      minAmountOut: "1",
-    },
+    validPolicyBody("1"),
   );
 
   assert.equal(response.status, 400);
@@ -170,24 +197,12 @@ test("POST /policy rejects demo minimum output outside local demo mode", async (
 
 test("POST /policy rejects out-of-range sqrt price before signing", async () => {
   const response = await requestJson(
-    createApp(
-      baseDeps({
-        policySigningEnabled: true,
-        localDemoMode: false,
-        signerWallet: undefined,
-      }),
-    ),
+    createApp(v2SigningDeps({ signerWallet: undefined })),
     "POST",
     "/policy",
     {
-      poolId: EXPECTED_PROTECTED_POOL.poolId,
-      trader: EXPECTED_SEPOLIA_ROUTER,
-      nonce: "1",
-      expiry: futureExpiry(),
-      amountSpecified: "-1000000",
-      zeroForOne: true,
+      ...validPolicyBody("100"),
       sqrtPriceLimitX96: String(MAX_SQRT_PRICE_LIMIT_X96),
-      minAmountOut: "100",
     },
   );
 
