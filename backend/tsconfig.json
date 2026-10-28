@@ -10,9 +10,5 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "exclude": [
-    "**/*.test.ts",
-    "src/signer/testSigner.ts",
-    "src/signer/verifyApiSignature.ts"
-  ]
+  "exclude": ["**/*.test.ts"]
 }
