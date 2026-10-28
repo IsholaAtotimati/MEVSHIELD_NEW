@@ -17,7 +17,15 @@
 
 set -Eeuo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve the repo root without depending on BASH_SOURCE, so the script also
+# works when invoked as `zsh ./script/docker-local-up.sh` instead of through its
+# bash shebang. macOS ships bash 3.2, so nothing newer than that is used.
+if [ -n "${BASH_SOURCE:-}" ]; then
+  _script_path="${BASH_SOURCE[0]}"
+else
+  _script_path="$0"
+fi
+REPO_ROOT="$(cd "$(dirname "$_script_path")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
@@ -171,13 +179,26 @@ print_addr() {
 log "verifying every layer"
 
 # anvil
-CHAIN_ID_RAW="$(curl -fsS -X POST -H 'content-type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
-  "http://localhost:$ANVIL_PORT" 2>/dev/null | sed -n 's/.*"result":"\([^"]*\)".*/\1/p' || true)"
-if [ "$CHAIN_ID_RAW" = "0x7a69" ]; then
+# The check is done in node rather than by parsing JSON with sed, because zsh
+# brace-expands the `{...}` literal inside a double-quoted string and would
+# mangle the request.
+CHAIN_OK="$(
+  RPC_URL="http://127.0.0.1:$ANVIL_PORT" node -e '
+    (async () => {
+      const res = await fetch(process.env.RPC_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+      });
+      const body = await res.json();
+      process.stdout.write(body.result === "0x7a69" ? "true" : String(body.result ?? ""));
+    })().catch(() => process.stdout.write(""));
+  ' 2>/dev/null || true
+)"
+if [ "$CHAIN_OK" = "true" ]; then
   info "anvil        eth_chainId 0x7a69 (31337)"
 else
-  fail "anvil did not report chain id 31337 (got '${CHAIN_ID_RAW:-no response}')"
+  fail "anvil did not report chain id 31337 (got '${CHAIN_OK:-no response}')"
 fi
 
 # contracts

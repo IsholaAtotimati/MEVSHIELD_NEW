@@ -49,6 +49,28 @@ fi
 mkdir -p "$DEPLOYMENTS_DIR"
 
 # ---------------------------------------------------------------------------
+# 0. Idempotency: skip the deploy if this exact deployment is already live
+# ---------------------------------------------------------------------------
+# `docker compose up` on a stack that is already running re-runs this one-shot
+# service. anvil keeps its state in memory, so a second deploy would land on
+# later nonces and produce different addresses, tripping the drift guard below.
+#
+# Re-deploying is therefore only correct against a fresh chain. When the recorded
+# addresses already have code and the pool is initialized, this deployment is
+# still live and there is nothing to do.
+if [ -f "$OUT_JSON" ] && [ -z "${FORCE_REDEPLOY:-}" ]; then
+  recorded_address="$(jq -r '.mevShieldRouter // empty' "$OUT_JSON")"
+  if [ -n "$recorded_address" ]; then
+    deployed_code="$(cast code "$recorded_address" --rpc-url "$ANVIL_RPC_URL" 2>/dev/null || echo "0x")"
+    if [ "$deployed_code" != "0x" ] && [ -n "$deployed_code" ]; then
+      log "existing deployment is still live at $recorded_address; skipping redeploy"
+      log "run 'docker compose down -v && docker compose up -d' to start from a clean chain"
+      exit 0
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Wait for anvil
 # ---------------------------------------------------------------------------
 log "waiting for anvil at $ANVIL_RPC_URL"
