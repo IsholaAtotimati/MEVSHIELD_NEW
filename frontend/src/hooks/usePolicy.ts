@@ -14,7 +14,7 @@ import {
   SWAP_TOKENS,
   type TokenSymbol,
 } from "../config/swapPool";
-import { parsePolicyResponseBody, parseRiskPreviewBody } from "../lib/apiValidation";
+import { parsePolicyResponseBody, parseRiskPreviewBody, apiErrorMessage } from "../lib/apiValidation";
 import { CONTRACTS } from "../lib/contracts";
 import { policyAuthorizationAbi, policyRegistryAbi } from "../lib/abis";
 import { shortAddress } from "../lib/format";
@@ -27,6 +27,7 @@ import {
   type ProtectedQuote,
 } from "../lib/protectedQuote";
 import { createRequestId, logFrontend, safeError } from "../lib/observability";
+import { readRegisteredPolicy } from "../lib/policyReads";
 import { policyResponseMatchesExpected } from "../lib/policyMatch";
 import { appendActivity } from "../lib/activityStorage";
 import { reportTransactionEvent } from "../lib/telemetry";
@@ -117,14 +118,7 @@ export function usePolicy(args: UsePolicyArgs) {
       const body: unknown = await response.json();
 
       if (!response.ok) {
-        const err =
-          body &&
-          typeof body === "object" &&
-          "error" in body &&
-          typeof (body as { error: unknown }).error === "string"
-            ? (body as { error: string }).error
-            : "Risk preview failed";
-        throw new Error(err);
+        throw new Error(apiErrorMessage(body, "Risk preview failed"));
       }
 
       const parsed = parseRiskPreviewBody(body);
@@ -152,19 +146,7 @@ export function usePolicy(args: UsePolicyArgs) {
 
   const loadPolicyById = useCallback(async (id: Hex) => {
     try {
-      const chainPolicy = await publicClient.readContract({
-        address: CONTRACTS.policyRegistry,
-        abi: policyRegistryAbi,
-        functionName: "getPolicy",
-        args: [id],
-      });
-
-      const consumed = await publicClient.readContract({
-        address: CONTRACTS.policyRegistry,
-        abi: policyRegistryAbi,
-        functionName: "isConsumed",
-        args: [chainPolicy.trader, chainPolicy.nonce],
-      });
+      const { policy: chainPolicy, consumed } = await readRegisteredPolicy(id);
 
       setPolicyStatus(
         `Trader ${shortAddress(chainPolicy.trader)} · Nonce ${chainPolicy.nonce} · Max Loss ${chainPolicy.maxLoss.toString()} · Max Fee ${chainPolicy.maxFee.toString()} · Minimum Output ${chainPolicy.minAmountOut.toString()} · ${consumed ? "CONSUMED" : "ACTIVE"}`,
@@ -353,14 +335,7 @@ export function usePolicy(args: UsePolicyArgs) {
       });
 
       if (!response.ok) {
-        const err =
-          data &&
-          typeof data === "object" &&
-          "error" in data &&
-          typeof (data as { error: unknown }).error === "string"
-            ? (data as { error: string }).error
-            : "Policy request failed";
-        throw new Error(err);
+        throw new Error(apiErrorMessage(data, "Policy request failed"));
       }
       if (!result) {
         throw new Error("Policy response failed validation.");

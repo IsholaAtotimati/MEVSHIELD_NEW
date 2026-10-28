@@ -28,6 +28,7 @@ import {
   isFreshDemoPoolReadiness,
   parseTokenAmount,
 } from "../lib/protectedQuote";
+import { isDecimalString, isPositiveDecimalString } from "../lib/apiValidation";
 import type { PolicyResponse } from "../lib/types";
 
 type TradeContextValue = ReturnType<typeof useTradeState>;
@@ -37,9 +38,9 @@ const TradeContext = createContext<TradeContextValue | null>(null);
 function hasValidPolicyBounds(policy: PolicyResponse | null): boolean {
   return Boolean(
     policy?.registered &&
-      /^\d+$/.test(policy.policy.maxLoss) &&
-      /^\d+$/.test(policy.policy.maxFee) &&
-      /^[1-9]\d*$/.test(policy.policy.minAmountOut),
+      isDecimalString(policy.policy.maxLoss) &&
+      isDecimalString(policy.policy.maxFee) &&
+      isPositiveDecimalString(policy.policy.minAmountOut),
   );
 }
 

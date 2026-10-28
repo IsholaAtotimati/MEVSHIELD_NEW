@@ -1,3 +1,14 @@
+/**
+ * Runtime validation for backend response bodies.
+ *
+ * Single responsibility: narrow untrusted JSON from the backend into the typed
+ * shapes in `lib/types.ts`, and read the backend's error envelope. No fetching,
+ * no formatting, no React.
+ *
+ * Consumers: `useBackendHealth` (health), `usePolicy` (risk preview, policy
+ * response, and error messages), and `context/TradeContext` (policy bounds).
+ * Add a parser here instead of casting a `fetch` body inline.
+ */
 import type {
   BackendHealth,
   PolicyResponse,
@@ -6,6 +17,32 @@ import type {
 } from "./types";
 
 const DECIMAL_STRING = /^\d+$/;
+const POSITIVE_DECIMAL_STRING = /^[1-9]\d*$/;
+
+/** True for a non-negative integer in decimal string form, e.g. "1500000". */
+export function isDecimalString(value: string): boolean {
+  return DECIMAL_STRING.test(value);
+}
+
+/** True for a strictly positive integer in decimal string form, e.g. "1". */
+export function isPositiveDecimalString(value: string): boolean {
+  return POSITIVE_DECIMAL_STRING.test(value);
+}
+
+/**
+ * Reads the `error` string out of a backend failure body.
+ *
+ * The backend always answers a failure with `{ error, code, requestId }`; when
+ * the body is not that shape (a proxy page, a truncated response) the caller
+ * gets its fallback instead of "[object Object]".
+ */
+export function apiErrorMessage(body: unknown, fallback: string): string {
+  if (body && typeof body === "object" && "error" in body) {
+    const error = (body as { error: unknown }).error;
+    if (typeof error === "string") return error;
+  }
+  return fallback;
+}
 
 const MONITOR_STATUSES = ["starting", "connected", "error", "disabled"];
 
