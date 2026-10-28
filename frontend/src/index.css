@@ -25,6 +25,9 @@
   --on-mint: #06281a;
   --on-bad: #2a0a0a;
 
+  /* The mockup radius scale. 18 is the browser frame radius in kemi-swap.html,
+     which is narrative chrome rather than app UI, so it is kept in the scale
+     but no app surface uses it yet. */
   --radius-10: 10px;
   --radius-12: 12px;
   --radius-14: 14px;
