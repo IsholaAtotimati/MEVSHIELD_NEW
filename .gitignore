@@ -10,8 +10,15 @@ backend/dist/
 /broadcast/*/11155111/
 /broadcast/**/dry-run/
 
-# Local notes stay untracked. Published reviews are committed.
+# Local notes stay untracked. Published reviews and the maintained doc set are committed.
 docs/*
+!docs/README.md
+!docs/architecture/
+!docs/services/
+!docs/api/
+!docs/features/
+!docs/operations/
+!docs/decisions/
 !docs/reviews/
 
 # Dotenv files - ignore all dotenvs but track examples
