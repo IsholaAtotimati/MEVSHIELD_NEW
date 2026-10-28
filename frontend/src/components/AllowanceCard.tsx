@@ -1,5 +1,7 @@
 import { formatTokenAmount } from "../lib/format";
-import ValueRow from "./ValueRow";
+import Button from "./Button";
+import Card from "./Card";
+import StatLine from "./StatLine";
 
 type AllowanceCardProps = {
   symbol: string;
@@ -12,6 +14,11 @@ type AllowanceCardProps = {
   onRevoke: () => void;
 };
 
+/**
+ * Router allowance for one token: the current figure, an exact-amount field
+ * and the two write actions. Behaviour is unchanged; only the surface and the
+ * row component moved to the shared kit.
+ */
 export default function AllowanceCard({
   symbol,
   decimals,
@@ -25,13 +32,17 @@ export default function AllowanceCard({
   const inputId = `approve-amount-${symbol.toLowerCase()}`;
 
   return (
-    <div className="card">
-      <h2>Router allowance ({symbol})</h2>
-      <ValueRow label="Current allowance">
+    <Card
+      title={`Router allowance (${symbol})`}
+      footer={`The router pulls ${symbol} only for the amount you approve here. Revoking sets the allowance back to zero.`}
+    >
+      <StatLine label="Current allowance" mono>
         {formatTokenAmount(allowance, decimals)} {symbol}
-      </ValueRow>      <label htmlFor={inputId}>
-        Exact amount to approve ({symbol})
+      </StatLine>
+      <label className="field" htmlFor={inputId}>
+        <span>Exact amount to approve in {symbol}</span>
         <input
+          className="input"
           id={inputId}
           type="text"
           inputMode="decimal"
@@ -42,17 +53,13 @@ export default function AllowanceCard({
         />
       </label>
       <div className="button-row">
-        <button type="button" disabled={busy} onClick={onApprove}>
+        <Button variant="ghost" disabled={busy} onClick={onApprove}>
           Approve exact amount
-        </button>
-        <button type="button" disabled={busy} onClick={onRevoke}>
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={onRevoke}>
           Revoke (zero)
-        </button>
+        </Button>
       </div>
-      <p className="muted">
-        The router pulls {symbol} only for the amount you approve here. Revoking
-        sets the allowance back to zero.
-      </p>
-    </div>
+    </Card>
   );
 }

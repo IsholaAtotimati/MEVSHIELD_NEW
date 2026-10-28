@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
 
 import AllowanceCard from "../components/AllowanceCard";
-import ValueRow from "../components/ValueRow";
+import Button from "../components/Button";
+import Card from "../components/Card";
+import Kicker from "../components/Kicker";
+import StatCard, { StatRow } from "../components/StatCard";
 import { TOKEN_NETWORK_LABEL } from "../config/chain";
 import { SWAP_POOL_CONFIGURATION, SWAP_TOKENS, WETH9_ADDRESS } from "../config/swapPool";
 import { useTrade } from "../context/TradeContext";
@@ -229,57 +232,72 @@ export default function PortfolioPage() {
 
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <h1>Portfolio</h1>
-        <p className="muted">{TOKEN_NETWORK_LABEL} ETH, WETH, and USDC. No USD values.</p>
+      <header className="page-head">
+        <Kicker>Balances</Kicker>
+        <h1 className="page-title">Portfolio</h1>
+        <p className="addr">
+          {TOKEN_NETWORK_LABEL} ETH, WETH, and USDC. No USD values.
+        </p>
       </header>
 
       {!wallet.account ? (
-        <div className="card empty-state">
-          <button type="button" onClick={() => void wallet.connectWallet()}>
-            Connect wallet
-          </button>
-        </div>
+        <Card>
+          <div className="empty-state">
+            <p>Connect a wallet to load balances and allowances.</p>
+            <Button onClick={() => void wallet.connectWallet()}>
+              Connect wallet
+            </Button>
+          </div>
+        </Card>
       ) : (
         <>
+          <StatRow>
+            <StatCard
+              label="ETH (unwrapped)"
+              value={formatTokenAmount(ethBalance, 18)}
+            />
+            <StatCard
+              label="WETH (used by swaps)"
+              value={formatTokenAmount(wethBalance, 18)}
+            />
+            <StatCard label="USDC" value={formatTokenAmount(usdcBalance, 6)} />
+          </StatRow>
+
+          <div className="toolbar">
+            <span className="note">
+              Balances above are read from {TOKEN_NETWORK_LABEL} for the
+              connected wallet.
+            </span>
+            <Button variant="ghost" onClick={() => void refresh()}>
+              Refresh balances
+            </Button>
+          </div>
+
           <div className="grid">
-            <div className="card">
-              <h2>Balances</h2>
-              <ValueRow label="ETH (unwrapped)">
-                {formatTokenAmount(ethBalance, 18)}
-              </ValueRow>
-              <ValueRow label="WETH (used by swaps)">
-                {formatTokenAmount(wethBalance, 18)}
-              </ValueRow>
-              <ValueRow label="USDC">
-                {formatTokenAmount(usdcBalance, 6)}
-              </ValueRow>
-              <button type="button" onClick={() => void refresh()}>
-                Refresh
-              </button>
-            </div>
-            <div className="card">
-              <h2>Wrap / unwrap</h2>
-              <label>
-                Amount (ETH or WETH)
+            <Card
+              title="Wrap / unwrap"
+              footer="Trade spends WETH. Wrap before swapping if your WETH balance above is too low."
+            >
+              <label className="field" htmlFor="wrap-amount">
+                <span>Amount in ETH or WETH</span>
                 <input
+                  className="input"
+                  id="wrap-amount"
+                  inputMode="decimal"
+                  autoComplete="off"
                   value={wrapAmount}
                   onChange={(event) => setWrapAmount(event.target.value)}
                 />
               </label>
               <div className="button-row">
-                <button type="button" disabled={busy} onClick={wrapEth}>
+                <Button variant="ghost" disabled={busy} onClick={wrapEth}>
                   Wrap ETH to WETH
-                </button>
-                <button type="button" disabled={busy} onClick={unwrapWeth}>
+                </Button>
+                <Button variant="ghost" disabled={busy} onClick={unwrapWeth}>
                   Unwrap WETH to ETH
-                </button>
+                </Button>
               </div>
-              <p className="muted">
-                Trade spends WETH. Wrap before swapping if your balance above is
-                too low.
-              </p>
-            </div>
+            </Card>
           </div>
 
           <div className="grid">
@@ -309,7 +327,7 @@ export default function PortfolioPage() {
             />
           </div>
 
-          <p className="action-status" role="status" aria-live="polite">
+          <p className="note" role="status" aria-live="polite">
             {status}
           </p>
         </>

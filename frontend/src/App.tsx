@@ -8,7 +8,6 @@ import PoliciesPage from "./pages/PoliciesPage";
 import PortfolioPage from "./pages/PortfolioPage";
 import TradePage from "./pages/TradePage";
 
-import "./App.css";
 
 export default function App() {
   return (

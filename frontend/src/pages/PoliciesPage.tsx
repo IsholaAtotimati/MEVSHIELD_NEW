@@ -1,43 +1,71 @@
 import { useEffect, useState } from "react";
 import type { Hex } from "viem";
 
+import Button from "../components/Button";
+import Card from "../components/Card";
+import Kicker from "../components/Kicker";
+import PolicyBox from "../components/PolicyBox";
+import RiskCallout from "../components/RiskCallout";
+import StatLine from "../components/StatLine";
 import { SWAP_TOKENS } from "../config/swapPool";
 import { useTrade } from "../context/TradeContext";
 import { loadPolicyDefaults, savePolicyDefaults } from "../lib/policyDefaults";
 import { readRegisteredPolicy } from "../lib/policyReads";
 import { formatBaseUnits, shortAddress } from "../lib/format";
 
+type InspectState =
+  | { kind: "idle"; message: string }
+  | { kind: "error"; message: string }
+  | {
+      kind: "found";
+      status: "active" | "consumed" | "expired";
+      trader: string;
+      nonce: string;
+      minAmountOut: string;
+      maxLoss: string;
+      maxFee: string;
+    };
+
 export default function PoliciesPage() {
   const { policy, wallet, setSlippageBps } = useTrade();
   const [defaults, setDefaults] = useState(loadPolicyDefaults);
   const [inspectId, setInspectId] = useState<Hex | "">("");
-  const [inspectText, setInspectText] = useState("Enter a policy ID to inspect.");
+  const [inspect, setInspect] = useState<InspectState>({
+    kind: "idle",
+    message: "Enter a policy ID to inspect.",
+  });
 
   useEffect(() => {
     setSlippageBps(defaults.slippageBps);
   }, [defaults.slippageBps, setSlippageBps]);
 
-  async function inspect() {
+  async function runInspect() {
     if (!inspectId) {
-      setInspectText("Enter a policy ID first.");
+      setInspect({ kind: "error", message: "Enter a policy ID first." });
       return;
     }
     try {
       const { policy: chainPolicy, consumed } = await readRegisteredPolicy(
         inspectId,
       );
-      const expired =
-        chainPolicy.expiry < BigInt(Math.floor(Date.now() / 1000));
-      const status = consumed
-        ? "consumed"
-        : expired
-          ? "expired"
-          : "active";
-      setInspectText(
-        `Status: ${status}. Trader ${shortAddress(chainPolicy.trader)}. Nonce ${chainPolicy.nonce.toString()}. Minimum output ${formatBaseUnits(chainPolicy.minAmountOut, SWAP_TOKENS.USDC.decimals)} USDC (pool units). Max loss ${chainPolicy.maxLoss.toString()} base units. Max fee ${chainPolicy.maxFee.toString()} base units.`,
-      );
+      const expired = chainPolicy.expiry < BigInt(Math.floor(Date.now() / 1000));
+      setInspect({
+        kind: "found",
+        status: consumed ? "consumed" : expired ? "expired" : "active",
+        trader: chainPolicy.trader,
+        nonce: chainPolicy.nonce.toString(),
+        minAmountOut: formatBaseUnits(
+          chainPolicy.minAmountOut,
+          SWAP_TOKENS.USDC.decimals,
+        ),
+        maxLoss: chainPolicy.maxLoss.toString(),
+        maxFee: chainPolicy.maxFee.toString(),
+      });
     } catch {
-      setInspectText("Policy not found or invalid policy ID.");
+      setInspect({
+        kind: "error",
+        message: "Policy not found or invalid policy ID.",
+      });
     }
   }
 
@@ -45,33 +73,45 @@ export default function PoliciesPage() {
 
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <h1>Policies</h1>
-        <p className="muted">Inspect policies and set local defaults for new trades.</p>
+      <header className="page-head">
+        <Kicker>Policies</Kicker>
+        <h1 className="page-title">Policies</h1>
+        <p className="addr">
+          Inspect policies and set local defaults for new trades.
+        </p>
       </header>
 
-      <div className="card">
-        <h2>Current session policy</h2>
+      <Card title="Current session policy">
         {!activePolicy ? (
-          <p className="muted">No policy loaded from the current Trade session.</p>
+          <p className="note">No policy loaded from the current Trade session.</p>
         ) : (
-          <ul className="policy-list">
-            <li>
-              ID <code>{activePolicy.policyId}</code> ·{" "}
-              {activePolicy.registered ? "registered" : "pending"} · nonce{" "}
+          <>
+            <StatLine label="Policy ID" mono>
+              {activePolicy.policyId}
+            </StatLine>
+            <StatLine
+              label="State"
+              tone={activePolicy.registered ? "gain" : "neutral"}
+            >
+              {activePolicy.registered ? "registered" : "pending"}
+            </StatLine>
+            <StatLine label="Nonce" mono>
               {activePolicy.policy.nonce}
-            </li>
-          </ul>
+            </StatLine>
+            <StatLine label="Risk level" mono>
+              {activePolicy.riskLevel}
+            </StatLine>
+          </>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h2>Inspect by policy ID</h2>
-        <label className="field-label" htmlFor="policy-inspect-id">
-          Policy ID (0x-prefixed 32-byte hash)
+      <Card title="Inspect by policy ID">
+        <label className="field" htmlFor="policy-inspect-id">
+          <span>Policy ID (0x-prefixed 32-byte hash)</span>
         </label>
-        <div className="policy-form">
+        <div className="field-row">
           <input
+            className="input"
             id="policy-inspect-id"
             value={inspectId}
             onChange={(event) => setInspectId(event.target.value as Hex)}
@@ -79,20 +119,53 @@ export default function PoliciesPage() {
             autoComplete="off"
             spellCheck={false}
           />
-          <button type="button" onClick={() => void inspect()}>
+          <Button variant="ghost" onClick={() => void runInspect()}>
             Inspect
-          </button>
+          </Button>
         </div>
-        <p className="policy-result" role="status" aria-live="polite">
-          {inspectText}
-        </p>
-      </div>
 
-      <div className="card">
-        <h2>Defaults for new policies</h2>
-        <label>
-          Slippage (bps)
+        <div role="status" aria-live="polite" className="inspect-result">
+          {inspect.kind === "idle" && <p className="note">{inspect.message}</p>}
+          {inspect.kind === "error" && (
+            <RiskCallout heading="Not found">{inspect.message}</RiskCallout>
+          )}
+          {inspect.kind === "found" && (
+            <PolicyBox title="On-chain policy">
+              <StatLine
+                label="Status"
+                mono
+                tone={inspect.status === "active" ? "gain" : "neutral"}
+              >
+                {inspect.status}
+              </StatLine>
+              <StatLine label="Trader" mono>
+                {shortAddress(inspect.trader)}
+              </StatLine>
+              <StatLine label="Nonce" mono>
+                {inspect.nonce}
+              </StatLine>
+              <StatLine label="Minimum output" mono>
+                {inspect.minAmountOut} USDC (pool units)
+              </StatLine>
+              <StatLine label="Max loss" mono>
+                {inspect.maxLoss} base units
+              </StatLine>
+              <StatLine label="Max fee" mono>
+                {inspect.maxFee} base units
+              </StatLine>
+            </PolicyBox>
+          )}
+        </div>
+      </Card>
+
+      <Card
+        title="Defaults for new policies"
+        footer="Stored locally in this browser. Saving also applies the slippage to the Trade page."
+      >
+        <label className="field">
+          <span>Slippage (bps)</span>
           <input
+            className="input"
             type="number"
             value={defaults.slippageBps}
             onChange={(event) =>
@@ -103,37 +176,41 @@ export default function PoliciesPage() {
             }
           />
         </label>
-        <label>
-          Max loss (base units, stored locally)
+        <label className="field">
+          <span>Max loss (base units, stored locally)</span>
           <input
+            className="input"
             value={defaults.maxLoss}
             onChange={(event) =>
               setDefaults((prev) => ({ ...prev, maxLoss: event.target.value }))
             }
           />
         </label>
-        <label>
-          Max fee (base units, stored locally)
+        <label className="field">
+          <span>Max fee (base units, stored locally)</span>
           <input
+            className="input"
             value={defaults.maxFee}
             onChange={(event) =>
               setDefaults((prev) => ({ ...prev, maxFee: event.target.value }))
             }
           />
         </label>
-        <button
-          type="button"
-          onClick={() => {
-            savePolicyDefaults(defaults);
-            setSlippageBps(defaults.slippageBps);
-          }}
-        >
-          Save defaults
-        </button>
-      </div>
+        <div className="button-row">
+          <Button
+            variant="primary"
+            onClick={() => {
+              savePolicyDefaults(defaults);
+              setSlippageBps(defaults.slippageBps);
+            }}
+          >
+            Save defaults
+          </Button>
+        </div>
+      </Card>
 
       {!wallet.account && (
-        <p className="muted">Connect a wallet on Trade to register new policies.</p>
+        <p className="note">Connect a wallet on Trade to register new policies.</p>
       )}
     </div>
   );

@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { formatGwei } from "viem";
 
+import Button from "../components/Button";
 import { CHAIN_LABEL, CHAIN_NAME } from "../config/chain";
 import { shortAddress } from "../lib/format";
 import { publicClient } from "../lib/viem";
 import { useTrade } from "../context/TradeContext";
 
+/** Wallet, chain, gas and backend health, in one hairline strip. */
 export default function TopBar() {
   const { wallet, backend } = useTrade();
-  const [gasPrice, setGasPrice] = useState<string>("—");
+  const [gasPrice, setGasPrice] = useState<string>("loading");
 
   useEffect(() => {
     let cancelled = false;
@@ -38,20 +40,21 @@ export default function TopBar() {
   return (
     <header className="top-bar">
       <div className="top-bar-group">
-        <button type="button" className="top-bar-wallet" onClick={() => void wallet.connectWallet()}>
-          {wallet.account
-            ? shortAddress(wallet.account)
-            : "Connect wallet"}
-        </button>
+        <Button
+          variant={wallet.account ? "ghost" : "primary"}
+          onClick={() => void wallet.connectWallet()}
+        >
+          {wallet.account ? shortAddress(wallet.account) : "Connect wallet"}
+        </Button>
         {wallet.wrongNetwork && (
           <span className="top-bar-warning">
             Wrong network. Switch to {CHAIN_NAME}.
           </span>
         )}
       </div>
-      <div className="top-bar-group top-bar-meta">
-        <span className="network-tag">{CHAIN_LABEL}</span>
-        <span>Gas estimate: {gasPrice} gwei</span>
+      <div className="top-bar-group">
+        <span className="network-tag mono">{CHAIN_LABEL}</span>
+        <span className="mono">Gas estimate: {gasPrice} gwei</span>
         <span
           className={`backend-status backend-status--${backend.healthState}`}
         >
