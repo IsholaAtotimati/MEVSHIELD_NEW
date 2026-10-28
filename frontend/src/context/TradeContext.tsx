@@ -9,8 +9,7 @@ import {
 
 import { MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED, SEPOLIA_DEMO_MODE } from "../config/env";
 import {
-  SWAP_POOL_ID,
-  SWAP_POOL_KEY,
+  SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
 } from "../config/swapPool";
@@ -27,6 +26,7 @@ import {
   getZeroForOne,
   isFreshDemoPoolReadiness,
   parseTokenAmount,
+  type SwapReadiness,
 } from "../lib/protectedQuote";
 import { isDecimalString, isPositiveDecimalString } from "../lib/apiValidation";
 import type { PolicyResponse } from "../lib/types";
@@ -56,20 +56,30 @@ function useTradeState() {
   const [slippageBps, setSlippageBps] = useState(50);
   const [clearExecutionTick, setClearExecutionTick] = useState(0);
 
-  const inputTokenBalance = useTokenBalance(
-    wallet.account,
-    SWAP_TOKENS[inputToken].address,
-  );
+  /**
+   * Pool identity, narrowed once here. When the local build has no token
+   * addresses, `SWAP_TOKENS[*].address` is `null`, the direction cannot be
+   * resolved, and the readiness gate reports the configuration error.
+   */
+  const inputTokenAddress = SWAP_TOKENS[inputToken].address;
+  const outputTokenAddress = SWAP_TOKENS[outputToken].address;
+
+  const inputTokenBalance = useTokenBalance(wallet.account, inputTokenAddress);
 
   const inputAmountBaseUnits = parseTokenAmount(
     inputAmount,
     SWAP_TOKENS[inputToken].decimals,
   );
-  const zeroForOne = getZeroForOne(
-    SWAP_TOKENS[inputToken].address,
-    SWAP_TOKENS[outputToken].address,
-    SWAP_POOL_KEY,
-  );
+  const zeroForOne =
+    SWAP_POOL_CONFIGURATION.status === "configured" &&
+    inputTokenAddress !== null &&
+    outputTokenAddress !== null
+      ? getZeroForOne(
+          inputTokenAddress,
+          outputTokenAddress,
+          SWAP_POOL_CONFIGURATION.poolKey,
+        )
+      : null;
   const quoteIsFresh = quoteHook.isQuoteFresh(inputAmountBaseUnits);
   const demoEstimateBaseUnits =
     SEPOLIA_DEMO_MODE && inputAmountBaseUnits !== null && zeroForOne !== null
@@ -101,20 +111,50 @@ function useTradeState() {
 
   const policyBoundsVerified = hasValidPolicyBounds(policyHook.policy);
 
-  const swapReadiness = calculateSwapReadiness({
-    amountInBaseUnits: inputAmountBaseUnits,
-    quote: quoteHook.protectedQuote,
-    nowMs: quoteHook.quoteClockMs,
-    poolId: SWAP_POOL_ID,
-    poolKeyMatches: zeroForOne !== null,
-    backendPoolKeyVerified: quoteHook.backendPoolKeyVerified,
-    protocolAddressesVerified: protocol.protocolAddressesVerified,
-    minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
-    authorizationVerified: protocol.hasAuthorization,
-    policyBoundsVerified,
-    demoMode: SEPOLIA_DEMO_MODE,
-    demoEstimateAvailable: demoEstimateReady,
-  });
+  /**
+   * Readiness for a configured pool. `null` when the local build has no token
+   * addresses; that case takes the unconfigured branch below instead.
+   */
+  const baseSwapReadiness =
+    SWAP_POOL_CONFIGURATION.status !== "configured"
+      ? null
+      : calculateSwapReadiness({
+          amountInBaseUnits: inputAmountBaseUnits,
+          quote: quoteHook.protectedQuote,
+          nowMs: quoteHook.quoteClockMs,
+          poolId: SWAP_POOL_CONFIGURATION.poolId,
+          poolKeyMatches: zeroForOne !== null,
+          backendPoolKeyVerified: quoteHook.backendPoolKeyVerified,
+          protocolAddressesVerified: protocol.protocolAddressesVerified,
+          minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
+          authorizationVerified: protocol.hasAuthorization,
+          policyBoundsVerified,
+          demoMode: SEPOLIA_DEMO_MODE,
+          demoEstimateAvailable: demoEstimateReady,
+        });
+
+  /**
+   * An unconfigured pool is a configuration error, not a market condition, so it
+   * is reported first and blocks both risk checking and execution.
+   *
+   * Composed here rather than inside `calculateSwapReadiness` so the readiness
+   * rules in `lib/protectedQuote.ts` keep taking only already-resolved values,
+   * which is what their tests assert.
+   */
+  const swapReadiness: SwapReadiness =
+    SWAP_POOL_CONFIGURATION.status === "configured" &&
+    baseSwapReadiness !== null
+      ? baseSwapReadiness
+      : {
+          canCheckRisk: false,
+          canExecute: false,
+          reasons: [
+            ...(SWAP_POOL_CONFIGURATION.status === "unconfigured"
+              ? [SWAP_POOL_CONFIGURATION.message]
+              : []),
+            ...(baseSwapReadiness?.reasons ?? []),
+          ],
+        };
 
   const executionHook = useExecution({
     account: wallet.account,

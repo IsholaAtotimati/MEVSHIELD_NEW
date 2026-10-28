@@ -18,6 +18,16 @@ export const LOCAL_RPC_URL = "http://localhost:8545";
 
 export const SEPOLIA_EXPLORER_URL = "https://sepolia.etherscan.io";
 
+/**
+ * Sepolia pool tokens: WETH9 and test USDC.
+ *
+ * These are the published deployment and stay hard-coded so a Sepolia build
+ * works with no environment at all. They are the only pool token addresses in
+ * the codebase with a built-in default; the local chain has none.
+ */
+export const SEPOLIA_TOKEN0_ADDRESS = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14";
+export const SEPOLIA_TOKEN1_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+
 /** Trimmed value, or undefined when absent or blank. */
 export function readEnvValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -89,4 +99,87 @@ export function resolveChainLabel(chainId: number): string {
 /** Chain name used in sentences and error text. */
 export function resolveChainName(chainId: number): string {
   return chainId === LOCAL_CHAIN_ID ? "Anvil Local" : "Sepolia";
+}
+
+/**
+ * Environment variables that carry the two pool token addresses.
+ *
+ * Order matches `token0` / `token1`, and is used in error text.
+ */
+export const LOCAL_POOL_TOKEN_ADDRESS_VARIABLES = [
+  "VITE_TOKEN0_ADDRESS",
+  "VITE_TOKEN1_ADDRESS",
+] as const;
+
+export type PoolTokenAddresses = { token0: string; token1: string };
+
+/**
+ * Result of resolving the pool token addresses.
+ *
+ * `unconfigured` carries no address at all. That is deliberate: there is no
+ * placeholder to fall back to, so a caller cannot accidentally treat a missing
+ * local deployment as a real one. It must either fail or report not-ready.
+ */
+export type PoolTokenAddressResolution =
+  | { status: "configured"; addresses: PoolTokenAddresses }
+  | { status: "unconfigured"; missingVariables: readonly string[] };
+
+/**
+ * Resolves the two pool token addresses for a chain id.
+ *
+ * Sepolia keeps the published values as its defaults, so a Sepolia build works
+ * with no env at all. The local chain has none: `script/SetupBackendSwap.s.sol`
+ * deploys a fresh mock pair to anvil on every deploy, so any built-in default
+ * would be a guess about a chain the build has not seen. A missing local
+ * variable is therefore reported as unconfigured rather than defaulted.
+ *
+ * The Sepolia pair can be passed in so the caller owns no second copy of it;
+ * omitting them uses the module constants.
+ */
+export function resolvePoolTokenAddresses(input: {
+  chainId: number;
+  token0: string | undefined;
+  token1: string | undefined;
+  sepoliaToken0?: string;
+  sepoliaToken1?: string;
+}): PoolTokenAddressResolution {
+  const token0 = readEnvValue(input.token0);
+  const token1 = readEnvValue(input.token1);
+
+  if (input.chainId !== LOCAL_CHAIN_ID) {
+    return {
+      status: "configured",
+      addresses: {
+        token0: token0 ?? input.sepoliaToken0 ?? SEPOLIA_TOKEN0_ADDRESS,
+        token1: token1 ?? input.sepoliaToken1 ?? SEPOLIA_TOKEN1_ADDRESS,
+      },
+    };
+  }
+
+  if (!token0 || !token1) {
+    const missingVariables: string[] = [];
+    if (!token0) missingVariables.push(LOCAL_POOL_TOKEN_ADDRESS_VARIABLES[0]);
+    if (!token1) missingVariables.push(LOCAL_POOL_TOKEN_ADDRESS_VARIABLES[1]);
+    return { status: "unconfigured", missingVariables };
+  }
+
+  return { status: "configured", addresses: { token0, token1 } };
+}
+
+/**
+ * Readable failure for a local build with no pool token addresses.
+ *
+ * Names every missing variable and the one place that is expected to supply
+ * them, so the operator does not have to guess or go looking for a default that
+ * does not exist.
+ */
+export function localPoolTokenAddressErrorMessage(
+  missingVariables: readonly string[],
+): string {
+  return (
+    `Local chain ${LOCAL_CHAIN_ID} has no default pool token addresses: ` +
+    `${missingVariables.join(", ")} ${missingVariables.length === 1 ? "is" : "are"} required. ` +
+    `docker-compose supplies these from the deploy output. Set ` +
+    `${missingVariables.join(" and ")}, or unset VITE_CHAIN_ID to build against Sepolia.`
+  );
 }

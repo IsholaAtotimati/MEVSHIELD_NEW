@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BACKEND_URL } from "../config/env";
 import { isLocalBackendUrl, SEPOLIA_DEMO_MODE } from "../config/env";
 import {
+  SWAP_POOL_CONFIGURATION,
   SWAP_POOL_EXPECTATION,
   SWAP_POOL_ID,
 } from "../config/swapPool";
@@ -33,8 +34,18 @@ export function useProtectedQuote() {
     !SEPOLIA_DEMO_MODE || isLocalBackendUrl(BACKEND_URL);
 
   const inspectProtectedPool = useCallback(async () => {
+    // An unconfigured local build has no pool to inspect. Report "not checked"
+    // rather than reading from a placeholder address; the readiness gate turns
+    // the unconfigured state into an explicit reason.
+    if (SWAP_POOL_ID === null || SWAP_POOL_EXPECTATION === null) {
+      setProtectedQuote({ status: "unavailable", reason: "not-checked" });
+      setQuoteClockMs(Date.now());
+      return;
+    }
+    const poolId = SWAP_POOL_ID;
+
     const quote = await loadProtectedPoolQuote(async () => {
-      const slots = poolStateSlots(SWAP_POOL_ID);
+      const slots = poolStateSlots(poolId);
       const blockNumber = await publicClient.getBlockNumber();
       const [
         chainId,
@@ -84,7 +95,7 @@ export function useProtectedQuote() {
         hookAuthorization,
         poolManagerHasCode: Boolean(managerCode && managerCode !== "0x"),
         hookHasCode: Boolean(hookCode && hookCode !== "0x"),
-        poolId: SWAP_POOL_ID,
+        poolId,
         ...poolState,
         observedAtMs: Date.now(),
       };
@@ -95,6 +106,10 @@ export function useProtectedQuote() {
   }, []);
 
   const verifyBackendPoolConfiguration = useCallback(async () => {
+    if (SWAP_POOL_EXPECTATION === null) {
+      setBackendPoolKeyVerified(false);
+      return;
+    }
     try {
       const response = await fetch(`${BACKEND_URL}/config/protected-pool`);
       if (!response.ok) {
@@ -136,11 +151,19 @@ export function useProtectedQuote() {
     quoteAgeSeconds,
     backendPoolKeyVerified:
       backendPoolKeyVerified && demoBackendIsLocal,
+    /**
+     * False when the local build has no token addresses configured: there is no
+     * pool key to compare a backend document against, so configuration cannot
+     * be verified.
+     */
+    poolConfigurationConfigured:
+      SWAP_POOL_CONFIGURATION.status === "configured",
     inspectProtectedPool,
     verifyBackendPoolConfiguration,
     isQuoteFresh: (
       amountBaseUnits: bigint | null,
     ) =>
+      SWAP_POOL_ID !== null &&
       isFreshQuote(
         protectedQuote,
         quoteClockMs,

@@ -10,8 +10,7 @@ import { buildPolicyExpiry } from "../config/policy";
 import {
   MIN_SQRT_PRICE_LIMIT_X96,
   MAX_SQRT_PRICE_LIMIT_X96,
-  SWAP_POOL_ID,
-  SWAP_POOL_KEY,
+  SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
 } from "../config/swapPool";
@@ -190,22 +189,29 @@ export function usePolicy(args: UsePolicyArgs) {
       authorizationVerified,
     } = args;
 
-    const swapReadiness = calculateSwapReadiness({
-      amountInBaseUnits: inputAmountBaseUnits,
-      quote: protectedQuote,
-      nowMs: quoteClockMs,
-      poolId: SWAP_POOL_ID,
-      poolKeyMatches: zeroForOne !== null,
-      backendPoolKeyVerified,
-      protocolAddressesVerified,
-      minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
-      authorizationVerified,
-      policyBoundsVerified: false,
-      demoMode: SEPOLIA_DEMO_MODE,
-      demoEstimateAvailable: demoEstimateReady,
-    });
+    const swapReadiness =
+      SWAP_POOL_CONFIGURATION.status === "unconfigured"
+        ? null
+        : calculateSwapReadiness({
+            amountInBaseUnits: inputAmountBaseUnits,
+            quote: protectedQuote,
+            nowMs: quoteClockMs,
+            poolId: SWAP_POOL_CONFIGURATION.poolId,
+            poolKeyMatches: zeroForOne !== null,
+            backendPoolKeyVerified,
+            protocolAddressesVerified,
+            minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
+            authorizationVerified,
+            policyBoundsVerified: false,
+            demoMode: SEPOLIA_DEMO_MODE,
+            demoEstimateAvailable: demoEstimateReady,
+          });
 
-    if (!swapReadiness.canCheckRisk || zeroForOne === null) {
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setActionStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    if (!swapReadiness || !swapReadiness.canCheckRisk || zeroForOne === null) {
       setActionStatus(
         SEPOLIA_DEMO_MODE
           ? "Demo policy creation requires the local backend and verified Sepolia deployment checks."
@@ -213,6 +219,9 @@ export function usePolicy(args: UsePolicyArgs) {
       );
       return;
     }
+
+    // Narrowed once, after the guards above.
+    const { poolId, poolKey } = SWAP_POOL_CONFIGURATION;
 
     setIsCreatingPolicy(true);
     clearPolicyState();
@@ -285,7 +294,7 @@ export function usePolicy(args: UsePolicyArgs) {
       }
       setAccount(connectedAccount);
 
-      if (calculatePoolId(SWAP_POOL_KEY) !== SWAP_POOL_ID) {
+      if (calculatePoolId(poolKey) !== poolId) {
         throw new Error(
           "Configured pool ID does not match the pool key and hook. Swap stopped to avoid a failing, high-gas transaction.",
         );
@@ -312,7 +321,7 @@ export function usePolicy(args: UsePolicyArgs) {
           "x-request-id": requestId,
         },
         body: JSON.stringify({
-          poolId: SWAP_POOL_ID,
+          poolId: poolId,
           trader: CONTRACTS.mevShieldRouter,
           nonce,
           expiry: expiry.toString(),
@@ -348,7 +357,7 @@ export function usePolicy(args: UsePolicyArgs) {
       }
 
       const expected = {
-        poolId: SWAP_POOL_ID,
+        poolId: poolId,
         trader: CONTRACTS.mevShieldRouter,
         nonce,
         expiry: expiry.toString(),

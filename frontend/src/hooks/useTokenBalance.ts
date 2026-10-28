@@ -16,14 +16,18 @@ type TokenBalanceState = {
  *
  * A cached read is only returned while it still belongs to the current account
  * and token, so switching either one never shows a stale amount.
+ *
+ * `token` is nullable because a local build with no token addresses configured
+ * has no address to read. That case reports a null balance instead of reading
+ * from a placeholder address.
  */
-export function useTokenBalance(account: Address | null, token: Address) {
+export function useTokenBalance(account: Address | null, token: Address | null) {
   const [state, setState] = useState<TokenBalanceState | null>(null);
 
   const refresh = useCallback(
     async (holder?: Address | null) => {
       const owner = holder ?? account;
-      if (!owner) {
+      if (!owner || !token) {
         setState(null);
         return;
       }

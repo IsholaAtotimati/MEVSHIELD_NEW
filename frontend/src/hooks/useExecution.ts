@@ -6,8 +6,7 @@ import { SEPOLIA_DEMO_MODE } from "../config/env";
 import {
   MIN_SQRT_PRICE_LIMIT_X96,
   MAX_SQRT_PRICE_LIMIT_X96,
-  SWAP_POOL_ID,
-  SWAP_POOL_KEY,
+  SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
 } from "../config/swapPool";
@@ -70,6 +69,10 @@ export function useExecution(args: UseExecutionArgs) {
       setActionStatus,
     } = args;
 
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setActionStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
     if (!swapReadiness.canExecute || zeroForOne === null) {
       setActionStatus(
         "Protected execution is unavailable until the protected quote, policy bounds, backend configuration, and on-chain checks are verified.",
@@ -80,6 +83,10 @@ export function useExecution(args: UseExecutionArgs) {
       setActionStatus("Create a policy before executing the swap.");
       return;
     }
+
+    // Narrowed once, after the guard above, so the rest of the function uses
+    // non-null pool identity without a cast.
+    const { poolId, poolKey, token0, token1 } = SWAP_POOL_CONFIGURATION;
 
     const requestId = policy.requestId || policyRequestId;
     const amountBaseUnits = inputAmountBaseUnits;
@@ -126,7 +133,7 @@ export function useExecution(args: UseExecutionArgs) {
             )
           : null;
       if (
-        policy.policy.poolId !== SWAP_POOL_ID ||
+        policy.policy.poolId !== poolId ||
         policy.policy.trader.toLowerCase() !==
           CONTRACTS.mevShieldRouter.toLowerCase() ||
         policy.policy.amountSpecified !== amountSpecified.toString() ||
@@ -147,7 +154,8 @@ export function useExecution(args: UseExecutionArgs) {
       }
 
       const amountIn = amountBaseUnits;
-      const inputTokenAddress = SWAP_TOKENS[inputToken].address;
+      const inputTokenAddress =
+        inputToken === "ETH" ? token0 : token1;
 
       const inputBalance = await publicClient.readContract({
         address: inputTokenAddress,
@@ -237,7 +245,7 @@ export function useExecution(args: UseExecutionArgs) {
         "Estimating the protected swap before requesting wallet confirmation...",
       );
       const swapArgs = [
-        SWAP_POOL_KEY,
+        poolKey,
         {
           zeroForOne,
           amountSpecified,

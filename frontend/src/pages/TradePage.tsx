@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 
 import { SEPOLIA_DEMO_MODE } from "../config/env";
-import { SWAP_POOL_ID, SWAP_TOKENS } from "../config/swapPool";
+import { SWAP_POOL_CONFIGURATION, SWAP_POOL_ID, SWAP_TOKENS } from "../config/swapPool";
 import { TOKEN_NETWORK_LABEL } from "../config/chain";
 import SwapInputs from "../components/SwapInputs";
 import { useTrade } from "../context/TradeContext";
@@ -90,9 +90,16 @@ export default function TradePage() {
       <section className="card trade-swap-card">
         <h1>Protected swap</h1>
         <p className="muted">
-          Route: MEVShield protected pool ({shortAddress(SWAP_POOL_ID)}).{" "}
-          {TOKEN_NETWORK_LABEL} test tokens only; no USD values are shown.
+          Route: MEVShield protected pool (
+          {SWAP_POOL_ID === null ? "unconfigured" : shortAddress(SWAP_POOL_ID)}
+          ). {TOKEN_NETWORK_LABEL} test tokens only; no USD values are shown.
         </p>
+
+        {SWAP_POOL_CONFIGURATION.status === "unconfigured" && (
+          <p className="warning" role="alert">
+            {SWAP_POOL_CONFIGURATION.message}
+          </p>
+        )}
 
         <SwapInputs
           inputToken={inputToken}

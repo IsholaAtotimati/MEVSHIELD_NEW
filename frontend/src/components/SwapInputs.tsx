@@ -8,7 +8,12 @@ import SwapDirectionButton from "./SwapDirectionButton";
 export type SwapTokenSymbol = "ETH" | "USDC";
 
 export type SwapTokenConfig = {
-  address: `0x${string}`;
+  /**
+   * `null` on a local build whose token addresses were not supplied. This
+   * component only renders labels and decimals, so it never reads the address;
+   * the trading paths check for `null` before reading or writing.
+   */
+  address: `0x${string}` | null;
   decimals: number;
   poolSymbol: string;
   displayName: string;

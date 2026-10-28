@@ -544,6 +544,21 @@ back to 8545 / 4000 / 5173.
 | `VITE_API_URL` | `http://localhost:4000` | Backend URL as reached from the browser |
 | `VITE_RPC_URL` | `http://localhost:8545` | Read RPC as reached from the browser |
 | `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` | false | The execute gate. Leave false |
+| `VITE_TOKEN0_ADDRESS` | none — supplied by compose | First pool token. **Required** on chain 31337 |
+| `VITE_TOKEN1_ADDRESS` | none — supplied by compose | Second pool token. **Required** on chain 31337 |
+
+`VITE_TOKEN0_ADDRESS` and `VITE_TOKEN1_ADDRESS` have no built-in local default.
+`script/SetupBackendSwap.s.sol` deploys a fresh mock pair to anvil, so a compiled-in
+address could only be a guess about a chain the build has not seen; a wrong
+address reads and trades against nothing and fails silently. Both are therefore
+build args in `docker-compose.yml` and are set from the deterministic addresses
+in section 5. If either is missing from a chain-31337 build, the frontend
+reports the app as unconfigured, names the missing variable, and keeps signing
+and execution disabled — it does not fall back to a placeholder. See
+[configuration.md](../operations/configuration.md#local-deployment-addresses-are-required-not-defaulted).
+
+Sepolia is unchanged: with no environment at all, a build targets chain 11155111
+and the published WETH9 / USDC addresses.
 
 ### Fixed in `docker-compose.yml`, not configurable
 

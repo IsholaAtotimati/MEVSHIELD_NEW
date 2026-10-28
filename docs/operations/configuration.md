@@ -10,20 +10,36 @@ Three general rules:
 
 ## Frontend variables
 
-Read in [frontend/src/config/env.ts](../../frontend/src/config/env.ts). Documented example: [frontend/.env.example](../../frontend/.env.example).
+Read in [frontend/src/config/env.ts](../../frontend/src/config/env.ts), [frontend/src/config/chain.ts](../../frontend/src/config/chain.ts) and [frontend/src/config/chainEnv.ts](../../frontend/src/config/chainEnv.ts). Documented example: [frontend/.env.example](../../frontend/.env.example).
 
 | Name | Required | Default | Purpose | Safety note |
 | --- | --- | --- | --- | --- |
 | `VITE_API_URL` | optional | `http://localhost:4000` | Base URL for every backend call | Public. Must be reachable from the browser and allowed by the backend CORS origin. In demo mode a non-local URL forces `backendPoolKeyVerified` to false |
 | `VITE_SEPOLIA_DEMO_MODE` | optional | unset, treated as false | Requests demo mode | Only takes effect when `import.meta.env.DEV` is also true, so a production build cannot enable it. Demo mode signs a 1-base-unit minimum output, which is not slippage protection |
 | `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` | optional | unset, treated as false | Opens the readiness gate for signing and execution | Setting this to true is the single action that enables execution in the UI. It should only be set after a live-stack fork test passes. See [ADR 0005](../decisions/0005-execute-gate-stays-closed.md) |
+| `VITE_CHAIN_ID` | optional | `11155111` | Chain the client reads and asks the wallet to switch to | Only decimal digits are accepted. A malformed value falls back to Sepolia rather than becoming the local chain. Set to `31337` for the local stack |
+| `VITE_RPC_URL` | optional | public Sepolia RPC, or `http://localhost:8545` on the local chain | Read RPC endpoint | Unauthenticated and inlined into the bundle, so never put a provider key here |
+| `VITE_EXPLORER_URL` | optional | `https://sepolia.etherscan.io`, none locally | Block explorer base | A local chain has no explorer unless one is configured |
+| `VITE_TOKEN0_ADDRESS` | required when `VITE_CHAIN_ID=31337`, optional on Sepolia | Sepolia WETH9 `0xfff9…6b14` | First pool token | **No local default.** See the note below |
+| `VITE_TOKEN1_ADDRESS` | required when `VITE_CHAIN_ID=31337`, optional on Sepolia | Sepolia USDC `0x1c7D…7238` | Second pool token | **No local default.** See the note below |
+| `VITE_TOKEN0_SYMBOL`, `VITE_TOKEN1_SYMBOL` | optional | `WETH` / `USDC`, or `MBA` / `MBB` locally | Display labels | Cosmetic only; they change no address and open no gate |
+| `VITE_*_ADDRESS` (contracts) | optional | Sepolia deployment, or the deterministic local deployment | Overrides for `lib/contracts.ts` | Display and read targets only. Changing them does not open the execute gate |
 | `VITE_*` build mode | implicit | `development` in dev, `production` in build | Logged as `environment` in frontend log lines | Not set directly; derived from the Vite mode |
+
+### Local deployment addresses are required, not defaulted
+
+The local chain has **no** built-in pool token addresses. `script/SetupBackendSwap.s.sol` deploys a fresh mock pair to anvil, so any compiled-in local address could only be a guess about a chain the build has not seen. A wrong address in a swap app reads and trades against nothing and fails silently, which is worse than a missing one.
+
+So for a local build (`VITE_CHAIN_ID=31337`):
+
+- `VITE_TOKEN0_ADDRESS` and `VITE_TOKEN1_ADDRESS` must be supplied from the deploy output. `docker-compose.yml` injects both as build args ([docker-compose.yml:229](../../docker-compose.yml#L229)), and `script/docker-deploy-local.sh` prints the values that must match them.
+- Omitting either one is an explicit configuration error. Resolution returns an `unconfigured` state naming the missing variables ([frontend/src/config/chainEnv.ts](../../frontend/src/config/chainEnv.ts)), never a zero address and never a fallback.
+- The UI then reports the app as not ready and renders the message. Signing and execution stay disabled. The bundle still loads, so the failure is readable instead of a blank page or a crash at import time.
+
+Sepolia is unaffected: with no environment at all, a build resolves to chain `11155111` and the published WETH9 / USDC addresses. That path is covered by `frontend/src/config/chainEnv.test.mjs`.
 
 Vite exposes `import.meta.env.DEV` and `import.meta.env.MODE` from its own mode, not from the environment file ([frontend/src/config/env.ts:4](../../frontend/src/config/env.ts#L4), [frontend/src/lib/observability.ts:12](../../frontend/src/lib/observability.ts#L12)).
 
-There is no frontend variable for the read RPC. The endpoint is hard-coded to `https://ethereum-sepolia-rpc.publicnode.com` in both the chain definition and the transport ([frontend/src/lib/contracts.ts:13](../../frontend/src/lib/contracts.ts#L13), [frontend/src/lib/viem.ts:12](../../frontend/src/lib/viem.ts#L12)).
-
-There is no frontend variable for contract addresses. They are constants in [frontend/src/lib/contracts.ts](../../frontend/src/lib/contracts.ts).
 
 ## Backend variables
 
@@ -150,6 +166,8 @@ The most consequential combinations:
 | `VITE_SEPOLIA_DEMO_MODE=true` in a production build | Demo mode is refused, because `import.meta.env.DEV` is false |
 | Any `PROTECTED_POOL_*` different from the pin | Startup throws with a message naming the approved pool |
 | `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` unset or false | The UI cannot sign or execute |
+| `VITE_CHAIN_ID=31337` without `VITE_TOKEN0_ADDRESS` / `VITE_TOKEN1_ADDRESS` | The UI reports an unconfigured pool naming the missing variables, and cannot sign or execute. Nothing falls back to a guessed address |
+| `VITE_CHAIN_ID` unset with no token addresses | Resolves to Sepolia and the published WETH9 / USDC addresses. This is the supported default |
 | Monitor variables missing | The monitor reports `disabled`, the rest of the backend works, `/health` still returns 200 |
 
 ## Related pages

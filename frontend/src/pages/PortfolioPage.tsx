@@ -4,7 +4,7 @@ import type { Address } from "viem";
 import AllowanceCard from "../components/AllowanceCard";
 import ValueRow from "../components/ValueRow";
 import { TOKEN_NETWORK_LABEL } from "../config/chain";
-import { SWAP_TOKENS, WETH9_ADDRESS } from "../config/swapPool";
+import { SWAP_POOL_CONFIGURATION, SWAP_TOKENS, WETH9_ADDRESS } from "../config/swapPool";
 import { useTrade } from "../context/TradeContext";
 import { erc20Abi, weth9Abi } from "../lib/abis";
 import { CONTRACTS } from "../lib/contracts";
@@ -19,10 +19,15 @@ type AllowanceAmounts = Record<AllowanceToken, string>;
 
 const EMPTY_ALLOWANCES: AllowanceBalances = { WETH: null, USDC: null };
 
-/** The pool trades WETH, so the ETH entry in SWAP_TOKENS is the WETH token. */
+/**
+ * The pool trades WETH, so the ETH entry in SWAP_TOKENS is the WETH token.
+ * Both addresses are `null` on a local build whose token addresses were not
+ * supplied; the page then reports the configuration error instead of reading
+ * from a placeholder.
+ */
 const ALLOWANCE_TOKENS: Record<
   AllowanceToken,
-  { address: Address; decimals: number }
+  { address: Address | null; decimals: number }
 > = {
   WETH: { address: WETH9_ADDRESS, decimals: SWAP_TOKENS.ETH.decimals },
   USDC: {
@@ -33,6 +38,14 @@ const ALLOWANCE_TOKENS: Record<
 
 export default function PortfolioPage() {
   const { wallet } = useTrade();
+  /**
+   * One message for every unconfigured path on this page, taken from the config
+   * module so the text is not restated per call site.
+   */
+  const unconfiguredMessage =
+    SWAP_POOL_CONFIGURATION.status === "unconfigured"
+      ? SWAP_POOL_CONFIGURATION.message
+      : "Pool token addresses are not configured.";
   const [ethBalance, setEthBalance] = useState<bigint | null>(null);
   const [wethBalance, setWethBalance] = useState<bigint | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null);
@@ -49,28 +62,36 @@ export default function PortfolioPage() {
   const refresh = useCallback(async () => {
     if (!wallet.account) return;
     const account = wallet.account;
+    // Without both token addresses there is nothing to read. Report the
+    // configuration error rather than querying an address that does not exist.
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    const wethAddress = SWAP_POOL_CONFIGURATION.token0;
+    const usdcAddress = SWAP_POOL_CONFIGURATION.token1;
     const [eth, weth, usdc, wethAllowance, usdcAllowance] = await Promise.all([
       publicClient.getBalance({ address: account }),
       publicClient.readContract({
-        address: WETH9_ADDRESS,
+        address: wethAddress,
         abi: weth9Abi,
         functionName: "balanceOf",
         args: [account],
       }),
       publicClient.readContract({
-        address: SWAP_TOKENS.USDC.address,
+        address: usdcAddress,
         abi: erc20Abi,
         functionName: "balanceOf",
         args: [account],
       }),
       publicClient.readContract({
-        address: WETH9_ADDRESS,
+        address: wethAddress,
         abi: erc20Abi,
         functionName: "allowance",
         args: [account, CONTRACTS.mevShieldRouter],
       }),
       publicClient.readContract({
-        address: SWAP_TOKENS.USDC.address,
+        address: usdcAddress,
         abi: erc20Abi,
         functionName: "allowance",
         args: [account, CONTRACTS.mevShieldRouter],
@@ -114,10 +135,15 @@ export default function PortfolioPage() {
       setStatus("Enter a positive ETH amount to wrap.");
       return;
     }
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    const wethAddress = SWAP_POOL_CONFIGURATION.token0;
     void submit(
       (account) =>
         getWalletClient().writeContract({
-          address: WETH9_ADDRESS,
+          address: wethAddress,
           abi: weth9Abi,
           functionName: "deposit",
           value,
@@ -134,10 +160,15 @@ export default function PortfolioPage() {
       setStatus("Enter a positive WETH amount to unwrap.");
       return;
     }
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    const wethAddress = SWAP_POOL_CONFIGURATION.token0;
     void submit(
       (account) =>
         getWalletClient().writeContract({
-          address: WETH9_ADDRESS,
+          address: wethAddress,
           abi: weth9Abi,
           functionName: "withdraw",
           args: [amount],
@@ -158,10 +189,14 @@ export default function PortfolioPage() {
       setStatus(`Enter a valid ${symbol} amount before approving.`);
       return;
     }
+    if (token.address === null) {
+      setStatus(unconfiguredMessage);
+      return;
+    }
     void submit(
       (account) =>
         getWalletClient().writeContract({
-          address: token.address,
+          address: token.address as Address,
           abi: erc20Abi,
           functionName: "approve",
           args: [CONTRACTS.mevShieldRouter, amount],
@@ -174,10 +209,14 @@ export default function PortfolioPage() {
 
   function revoke(symbol: AllowanceToken) {
     const token = ALLOWANCE_TOKENS[symbol];
+    if (token.address === null) {
+      setStatus(unconfiguredMessage);
+      return;
+    }
     void submit(
       (account) =>
         getWalletClient().writeContract({
-          address: token.address,
+          address: token.address as Address,
           abi: erc20Abi,
           functionName: "approve",
           args: [CONTRACTS.mevShieldRouter, 0n],
