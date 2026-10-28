@@ -244,9 +244,10 @@ export default function PortfolioPage() {
         <Card>
           <div className="empty-state">
             <p>Connect a wallet to load balances and allowances.</p>
-            <Button onClick={() => void wallet.connectWallet()}>
-              Connect wallet
-            </Button>
+            <p className="note">
+              Use <strong>Connect wallet</strong> in the top bar. Balances and
+              allowances for the connected wallet appear here.
+            </p>
           </div>
         </Card>
       ) : (

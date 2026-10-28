@@ -210,7 +210,10 @@ export default function PoliciesPage() {
       </Card>
 
       {!wallet.account && (
-        <p className="note">Connect a wallet on Trade to register new policies.</p>
+        <p className="note">
+          Use <strong>Connect wallet</strong> in the top bar to register new
+          policies.
+        </p>
       )}
     </div>
   );

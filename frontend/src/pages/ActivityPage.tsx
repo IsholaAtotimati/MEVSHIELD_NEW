@@ -109,15 +109,13 @@ export default function ActivityPage() {
         <Card>
           <div className="empty-state">
             <p>Connect a wallet to see your protected swap history.</p>
-            <Button onClick={() => void wallet.connectWallet()}>
-              Connect wallet
-            </Button>
             <p className="note">
-              Or run a dummy trade on the{" "}
+              Use <strong>Connect wallet</strong> in the top bar. Then run a
+              dummy trade on the{" "}
               <Link className="link" to="/">
                 Trade
               </Link>{" "}
-              page after connecting.
+              page and come back here for the proof record.
             </p>
           </div>
         </Card>
