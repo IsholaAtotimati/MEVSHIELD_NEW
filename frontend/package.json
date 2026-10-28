@@ -8,7 +8,7 @@
     "demo": "vite --mode demo",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs",
+    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/lib/networkVerification.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

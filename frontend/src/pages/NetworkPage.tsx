@@ -8,53 +8,49 @@ import StatLine from "../components/StatLine";
 import { CHAIN_NAME } from "../config/chain";
 import { useTrade } from "../context/TradeContext";
 import { CONTRACTS } from "../lib/contracts";
-import { verificationTone } from "../lib/statusTone";
+import {
+  buildVerificationRows,
+  VERIFICATION_STATE_LABELS,
+  type ContractVerificationRow,
+  type VerificationState,
+} from "../lib/networkVerification";
 
-type ContractRow = {
-  name: string;
-  expected: string;
-  observed: string | null;
-};
+/**
+ * Tone for a verification cell, in the mockup's mint/bad language. `null` keeps
+ * the default text colour, which is what an unverified row deserves: it is not
+ * a failure, but it is not a pass either.
+ */
+function stateTone(state: VerificationState): "ok" | "no" | null {
+  if (state === "pass") return "ok";
+  if (state === "mismatch") return "no";
+  return null;
+}
+
+/** Why a row carries no verdict, shown next to the "Not checked" label. */
+function stateLabel(row: ContractVerificationRow): string {
+  const label = VERIFICATION_STATE_LABELS[row.state];
+  return row.reason ? `${label} · ${row.reason}` : label;
+}
 
 export default function NetworkPage() {
   const { protocol, backend } = useTrade();
   const { deployment } = protocol;
   const monitor = backend.health?.sepoliaMonitor;
 
-  const rows: ContractRow[] = [
-    {
-      name: "PoolManager",
-      expected: CONTRACTS.poolManager,
-      observed: deployment.poolManager,
+  // Rows come from the pure builder so every verdict compares the configured
+  // address against a value read from chain. The hook and router have no
+  // on-chain source, so those rows report Not checked rather than a pass.
+  const rows = buildVerificationRows({
+    contracts: CONTRACTS,
+    observed: {
+      poolManager: deployment.poolManager,
+      authorization: deployment.authorization,
+      registry: deployment.registry,
+      verifier: deployment.verifier,
     },
-    {
-      name: "MEVShieldHook",
-      expected: CONTRACTS.mevShieldHook,
-      observed: CONTRACTS.mevShieldHook,
-    },
-    {
-      name: "PolicyRegistry",
-      expected: CONTRACTS.policyRegistry,
-      observed: deployment.registry,
-    },
-    {
-      name: "PolicyVerifier",
-      expected: CONTRACTS.policyVerifier,
-      observed: deployment.verifier,
-    },
-    {
-      name: "PolicyAuthorization",
-      expected: CONTRACTS.policyAuthorization,
-      observed: CONTRACTS.poolAuthorization,
-    },
-    {
-      name: "MEVShieldRouter",
-      expected: CONTRACTS.mevShieldRouter,
-      observed: CONTRACTS.mevShieldRouter,
-    },
-  ];
+  });
 
-  const columns: DataTableColumn<ContractRow>[] = [
+  const columns: DataTableColumn<ContractVerificationRow>[] = [
     {
       key: "name",
       header: "Contract",
@@ -75,11 +71,8 @@ export default function NetworkPage() {
     {
       key: "state",
       header: "Check",
-      status: (row) => verificationTone(row.observed, row.expected),
-      render: (row) =>
-        verificationTone(row.observed, row.expected) === "ok"
-          ? "Pass"
-          : "Mismatch",
+      status: (row) => stateTone(row.state),
+      render: (row) => stateLabel(row),
     },
     {
       key: "explorer",
@@ -98,7 +91,7 @@ export default function NetworkPage() {
 
       <Card
         title="Contract verification"
-        footer="Expected values are compiled into this build. A mismatch keeps swaps disabled."
+        footer="Expected values are compiled into this build and compared with the addresses read from chain. Rows marked Not checked have no on-chain source, so they stay unverified rather than confirmed."
       >
         <DataTable
           columns={columns}
