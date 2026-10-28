@@ -16,6 +16,7 @@ import { signProtectedPolicy } from "./policy/policySigning.js";
 import { PolicyRequestSchema } from "./policy/policyRequest.js";
 import { httpLifecycleMiddleware } from "./middleware/httpLifecycle.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
+import { sendApiError } from "./http/apiError.js";
 import {
   startSepoliaMonitor,
   type SepoliaMonitorSnapshot,
@@ -122,16 +123,19 @@ export function createApp(deps: AppDependencies): Express {
     const parsed = RiskPreviewRequestSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      return res.status(400).json({
-        error: "Invalid risk-preview request",
-        details: parsed.error.issues,
-      });
+      return sendApiError(
+        res,
+        400,
+        "invalid_preview",
+        "Invalid risk-preview request",
+        { details: parsed.error.issues },
+      );
     }
 
     const result = previewRisk(parsed.data);
 
     if (!result.ok) {
-      return res.status(400).json({ error: result.error });
+      return sendApiError(res, 400, "invalid_preview", result.error);
     }
 
     return res.json(result.data);
@@ -141,10 +145,12 @@ export function createApp(deps: AppDependencies): Express {
     // Feature gate first: when signing is off, the route is unavailable and we do
     // not validate policy fields (avoids misleading 400s on a disabled endpoint).
     if (!deps.policySigningEnabled) {
-      return res.status(503).json({
-        error:
-          "Policy signing is disabled until the v2 minimum-output contracts are deployed and verified.",
-      });
+      return sendApiError(
+        res,
+        503,
+        "policy_signing_disabled",
+        "Policy signing is disabled until the v2 minimum-output contracts are deployed and verified.",
+      );
     }
 
     try {
@@ -152,26 +158,38 @@ export function createApp(deps: AppDependencies): Express {
       const requestId = String(res.locals.requestId);
 
       if (deps.localDemoMode && input.minAmountOut !== "1") {
-        return res.status(400).json({
-          error: "Invalid demo minimum output",
-          details:
-            "Local Sepolia demo policies must use a minimum output of exactly 1 base unit.",
-        });
+        return sendApiError(
+          res,
+          400,
+          "invalid_minimum_output",
+          "Invalid demo minimum output",
+          {
+            details:
+              "Local Sepolia demo policies must use a minimum output of exactly 1 base unit.",
+          },
+        );
       }
 
       if (!deps.localDemoMode && input.minAmountOut === "1") {
-        return res.status(400).json({
-          error: "Invalid minimum output",
-          details:
-            "A minimum output of 1 base unit is only allowed in local Sepolia demo mode.",
-        });
+        return sendApiError(
+          res,
+          400,
+          "invalid_minimum_output",
+          "Invalid minimum output",
+          {
+            details:
+              "A minimum output of 1 base unit is only allowed in local Sepolia demo mode.",
+          },
+        );
       }
 
       if (!deps.signerWallet) {
-        return res.status(503).json({
-          error:
-            "Policy signing is enabled but no signer wallet is configured.",
-        });
+        return sendApiError(
+          res,
+          503,
+          "signer_unavailable",
+          "Policy signing is enabled but no signer wallet is configured.",
+        );
       }
 
       const wallet = deps.signerWallet;
@@ -179,18 +197,26 @@ export function createApp(deps: AppDependencies): Express {
       try {
         assertConfiguredPoolId(input.poolId, deps.protectedPool);
       } catch {
-        return res.status(400).json({
-          error: "Invalid protected pool",
-          details:
-            "The requested pool ID does not match the configured Sepolia WETH/USDC pool.",
-        });
+        return sendApiError(
+          res,
+          400,
+          "invalid_pool",
+          "Invalid protected pool",
+          {
+            details:
+              "The requested pool ID does not match the configured Sepolia WETH/USDC pool.",
+          },
+        );
       }
 
       if (input.trader.toLowerCase() !== deps.routerAddress.toLowerCase()) {
-        return res.status(400).json({
-          error: "Invalid policy trader",
-          details: "The policy trader must be the configured MEVShield router.",
-        });
+        return sendApiError(
+          res,
+          400,
+          "invalid_trader",
+          "Invalid policy trader",
+          { details: "The policy trader must be the configured MEVShield router." },
+        );
       }
 
       logEvent("info", "risk_analysis_started", {
@@ -284,26 +310,26 @@ export function createApp(deps: AppDependencies): Express {
       });
 
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          error: "Invalid request",
+        return sendApiError(res, 400, "invalid_request", "Invalid request", {
           details: error.issues,
         });
       }
 
-      return res.status(500).json({
-        error: "Internal error",
-        requestId: String(res.locals.requestId),
-      });
+      return sendApiError(res, 500, "internal_error", "Internal error");
+
     }
   });
 
   app.post("/observability/transaction", (req, res) => {
     const parsed = TransactionEventSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({
-        error: "Invalid transaction event",
-        details: parsed.error.issues,
-      });
+      return sendApiError(
+        res,
+        400,
+        "invalid_request",
+        "Invalid transaction event",
+        { details: parsed.error.issues },
+      );
     }
 
     const requestId = String(res.locals.requestId);
@@ -315,6 +341,17 @@ export function createApp(deps: AppDependencies): Express {
     res.status(202).json({ accepted: true, requestId });
   });
 
+  // Unknown routes answer with the same JSON error shape as every other
+  // failure instead of Express's default HTML page.
+  app.use((req, res) => {
+    sendApiError(
+      res,
+      404,
+      "not_found",
+      `No route for ${req.method} ${req.path}`,
+    );
+  });
+
   app.use(
     (
       error: unknown,
@@ -323,9 +360,7 @@ export function createApp(deps: AppDependencies): Express {
       next: express.NextFunction,
     ) => {
       if (error instanceof SyntaxError) {
-        return res.status(400).json({
-          error: "Invalid JSON body",
-        });
+        return sendApiError(res, 400, "invalid_json", "Invalid JSON body");
       }
       return next(error);
     },

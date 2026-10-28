@@ -209,3 +209,73 @@ test("POST /policy rejects out-of-range sqrt price before signing", async () => 
   assert.equal(response.status, 400);
   assert.equal(response.json.error, "Invalid request");
 });
+
+test("error responses carry a stable code, message, and request ID", async () => {
+  const response = await requestJson(createApp(baseDeps()), "POST", "/policy", {});
+
+  assert.equal(response.status, 503);
+  assert.equal(response.json.code, "policy_signing_disabled");
+  assert.equal(
+    response.json.error,
+    "Policy signing is disabled until the v2 minimum-output contracts are deployed and verified.",
+  );
+  assert.equal(typeof response.json.requestId, "string");
+  assert.equal(response.json.requestId, response.headers.get("x-request-id"));
+});
+
+test("validation errors keep the error string and add details plus code", async () => {
+  const response = await requestJson(
+    createApp(v2SigningDeps({ signerWallet: undefined })),
+    "POST",
+    "/policy",
+    { trader: "not-an-address" },
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal(response.json.error, "Invalid request");
+  assert.equal(response.json.code, "invalid_request");
+  assert.ok(Array.isArray(response.json.details));
+});
+
+test("invalid JSON body uses the invalid_json code without leaking details", async () => {
+  const app = createApp(baseDeps());
+  const server = createServer(app);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/policy`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    });
+    const json = (await response.json()) as Record<string, unknown>;
+    assert.equal(response.status, 400);
+    assert.equal(json.error, "Invalid JSON body");
+    assert.equal(json.code, "invalid_json");
+    assert.equal(json.details, undefined);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test("unknown routes answer with the typed 404 body", async () => {
+  const response = await requestJson(createApp(baseDeps()), "GET", "/no-such-route");
+
+  assert.equal(response.status, 404);
+  assert.equal(response.json.code, "not_found");
+  assert.match(String(response.json.error), /No route for GET \/no-such-route/);
+});
+
+test("successful responses keep their existing body shape", async () => {
+  const response = await requestJson(createApp(baseDeps()), "GET", "/health");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.code, undefined);
+  assert.equal(response.json.error, undefined);
+  assert.equal(response.json.requestId, undefined);
+});
