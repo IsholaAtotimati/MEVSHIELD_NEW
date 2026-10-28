@@ -315,11 +315,14 @@ export default function TradePage() {
 
         {riskMatchesInputs && policy.riskPreview && (
           <>
-            <RiskCallout heading={`Risk ${policy.riskPreview.riskLevel}`}>
-              A deterministic MVP estimate for this amount and direction, not
-              live market analysis. On a public route a bot can trade ahead of
-              the fill.
+            <RiskCallout heading="Public route risk">
+              On a public route a bot can trade ahead of this fill. The figures
+              below are a deterministic MVP estimate for this amount and
+              direction, not live market analysis.
             </RiskCallout>
+            <StatLine label="Risk level" mono>
+              {policy.riskPreview.riskLevel}
+            </StatLine>
             <StatLine label="Model" mono>
               {policy.riskPreview.model}
             </StatLine>
