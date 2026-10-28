@@ -6,6 +6,7 @@ import {
   MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
   SEPOLIA_DEMO_MODE,
 } from "../config/env";
+import { buildPolicyExpiry } from "../config/policy";
 import {
   MIN_SQRT_PRICE_LIMIT_X96,
   MAX_SQRT_PRICE_LIMIT_X96,
@@ -301,7 +302,7 @@ export function usePolicy(args: UsePolicyArgs) {
 
       await ensureSepolia();
 
-      const expiry = Math.floor(Date.now() / 1000) + 3600;
+      const expiry = buildPolicyExpiry(Date.now() / 1000);
       const nonce = Date.now().toString();
 
       const response = await fetch(`${BACKEND_URL}/policy`, {
