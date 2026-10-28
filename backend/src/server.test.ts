@@ -47,6 +47,18 @@ function v2SigningDeps(
   });
 }
 
+/** Signing on, local demo on — exercises the demo minimum-output rule. */
+function demoSigningDeps(
+  overrides: Partial<AppDependencies> = {},
+): AppDependencies {
+  return baseDeps({
+    policySigningEnabled: true,
+    localDemoMode: true,
+    signerWallet: TEST_SIGNER_WALLET,
+    ...overrides,
+  });
+}
+
 function baseDeps(
   overrides: Partial<AppDependencies> = {},
 ): AppDependencies {
@@ -193,6 +205,39 @@ test("POST /policy rejects minAmountOut of 1 when signing enabled without local 
 
   assert.equal(response.status, 400);
   assert.match(String(response.json.error), /Invalid minimum output/);
+});
+
+test("POST /policy accepts minAmountOut of 1 when local demo mode is enabled", async () => {
+  const response = await requestJson(
+    createApp(demoSigningDeps()),
+    "POST",
+    "/policy",
+    validPolicyBody("1"),
+  );
+
+  assert.equal(response.status, 200);
+  const policy = response.json.policy as { minAmountOut: string };
+  assert.equal(policy.minAmountOut, "1");
+  assert.match(String(response.json.signature), /^0x[0-9a-f]{130}$/);
+  assert.equal(response.json.demoMode, true);
+});
+
+test("POST /policy rejects a demo minimum output other than 1 in local demo mode", async () => {
+  for (const minAmountOut of ["2", "100"]) {
+    const response = await requestJson(
+      createApp(demoSigningDeps()),
+      "POST",
+      "/policy",
+      validPolicyBody(minAmountOut),
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(response.json.error, "Invalid demo minimum output");
+    assert.match(
+      String(response.json.details),
+      /must use a minimum output of exactly 1 base unit/,
+    );
+  }
 });
 
 test("POST /policy rejects out-of-range sqrt price before signing", async () => {
