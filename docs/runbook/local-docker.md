@@ -430,8 +430,18 @@ design.
   deliberate change.
 
 - **Host port conflicts are not auto-resolved.** If 4000 or 5173 is already in
-  use, `docker compose up` fails with `bind: address already in use`. Set the
-  port variables from section 4 and rebuild the frontend.
+  use, `docker compose up` fails with `bind: address already in use`, and the
+  up script reports `the stack did not become healthy` while naming the port.
+  In that state anvil is healthy and `contracts-deploy` still exits 0 — only the
+  backend container fails to start. Set the port variables from section 4 and
+  rebuild the frontend.
+
+  This was observed on the verification machine: an unrelated process held port
+  4000, so the default-port run reached `contracts-deploy Exited (0)` and then
+  failed with
+  `ports are not available: exposing port TCP 0.0.0.0:4000 ... address already in use`.
+  Running the same stack with `BACKEND_PORT=4100` and matching URLs was healthy,
+  which is the configuration recorded in section 14.
 
 ---
 
@@ -522,9 +532,10 @@ configuration and that a production runtime refuses chain 31337.
 ## 14. Verification record
 
 The following was run on macOS 27.2.0 (arm64) with Docker 28.5.1 and Compose
-2.40.3. Ports 8645 / 4100 / 5273 were used here only because port 4000 was
-occupied by an unrelated process on the verification machine; with the defaults
-the same commands use 8545 / 4000 / 5173.
+2.40.3. Ports 8645 / 4100 / 5273 were used because port 4000 was occupied by an
+unrelated process on the verification machine; with the defaults the same
+commands use 8545 / 4000 / 5173. See the last known limitation in section 11 for
+the exact failure the default-port run produced here.
 
 ### `docker compose config`
 
