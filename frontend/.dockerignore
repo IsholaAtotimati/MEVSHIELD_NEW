@@ -1,0 +1,34 @@
+# Build context for the frontend image (context is ./frontend).
+#
+# Keeps dependencies, prior build output, local env files and VCS data out of
+# the build context. VITE_* values are passed as build args, never as files.
+
+# Dependencies are reinstalled inside the image from the lockfile.
+node_modules
+
+# Compiled output is produced inside the image.
+dist
+build
+
+# Local environment files. Vite would otherwise inline any .env.local it finds.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor, OS and VCS noise.
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Logs and coverage.
+*.log
+npm-debug.log*
+coverage
+
+# Test sources do not affect the bundle.
+src/**/*.test.mjs
+src/**/*.test.ts
+README.md
