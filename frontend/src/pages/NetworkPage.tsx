@@ -1,7 +1,8 @@
 import AddressRow from "../components/AddressRow";
 import { useTrade } from "../context/TradeContext";
 import { CONTRACTS } from "../lib/contracts";
-import { etherscanAddressUrl } from "../lib/format";
+import { CHAIN_NAME } from "../config/chain";
+import ExplorerLink from "../components/ExplorerLink";
 
 type ContractRow = {
   name: string;
@@ -66,13 +67,7 @@ export default function NetworkPage() {
                 <span className={pass ? "verify-pass" : "verify-fail"}>
                   {pass ? "Pass" : "Mismatch"}
                 </span>
-                <a
-                  href={etherscanAddressUrl(row.expected)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Etherscan
-                </a>
+                <ExplorerLink address={row.expected} />
               </div>
             );
           })}
@@ -114,7 +109,7 @@ export default function NetworkPage() {
           <p className="muted" role="status" aria-live="polite">
             {monitor?.lastCheckedBlock === undefined
               ? "The backend has not reported a scanned block yet."
-              : `The monitor has scanned Sepolia up to block ${monitor.lastCheckedBlock.toLocaleString()}. A block number that stops advancing means the backend monitor is stalled.`}
+              : `The monitor has scanned ${CHAIN_NAME} up to block ${monitor.lastCheckedBlock.toLocaleString()}. A block number that stops advancing means the backend monitor is stalled.`}
           </p>
         </div>
       </div>

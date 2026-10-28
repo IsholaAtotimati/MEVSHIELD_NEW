@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { CHAIN_NAME } from "../config/chain";
 import { CONTRACTS } from "../lib/contracts";
 import {
   mevShieldHookAbi,
@@ -88,7 +89,7 @@ export function useProtocol() {
     } catch (error) {
       console.error(error);
       setProtocolStatus(
-        "Could not connect to Sepolia. Check your RPC connection.",
+        `Could not connect to ${CHAIN_NAME}. Check your RPC connection.`,
       );
     }
   }, []);

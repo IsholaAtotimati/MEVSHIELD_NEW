@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 
 import { useTrade } from "../context/TradeContext";
 import { useActivityFeed } from "../hooks/useActivityFeed";
-import { etherscanTxUrl } from "../lib/format";
+import ExplorerLink from "../components/ExplorerLink";
 
 export default function ActivityPage() {
   const { wallet } = useTrade();
@@ -84,17 +84,7 @@ export default function ActivityPage() {
                       <td>{row.minAmountOut}</td>
                       <td>{row.status}</td>
                       <td>
-                        {row.txHash ? (
-                          <a
-                            href={etherscanTxUrl(row.txHash)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Etherscan
-                          </a>
-                        ) : (
-                          "—"
-                        )}
+                        <ExplorerLink txHash={row.txHash} />
                       </td>
                     </tr>
                   ))}

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { SEPOLIA_DEMO_MODE } from "../config/env";
 import { SWAP_POOL_ID, SWAP_TOKENS } from "../config/swapPool";
+import { TOKEN_NETWORK_LABEL } from "../config/chain";
 import SwapInputs from "../components/SwapInputs";
 import { useTrade } from "../context/TradeContext";
 import {
@@ -10,7 +11,8 @@ import {
   DEMO_MIN_AMOUNT_OUT,
   DEMO_USDC_PER_WETH,
 } from "../lib/protectedQuote";
-import { etherscanTxUrl, shortAddress } from "../lib/format";
+import { shortAddress } from "../lib/format";
+import ExplorerLink from "../components/ExplorerLink";
 import Metric from "../components/Metric";
 
 const SLIPPAGE_PRESETS = [
@@ -85,8 +87,8 @@ export default function TradePage() {
       <section className="card trade-swap-card">
         <h1>Protected swap</h1>
         <p className="muted">
-          Route: MEVShield protected pool ({shortAddress(SWAP_POOL_ID)}). Sepolia
-          test tokens only; no USD values are shown.
+          Route: MEVShield protected pool ({shortAddress(SWAP_POOL_ID)}).{" "}
+          {TOKEN_NETWORK_LABEL} test tokens only; no USD values are shown.
         </p>
 
         <SwapInputs
@@ -259,13 +261,9 @@ export default function TradePage() {
               {SWAP_TOKENS[outputToken].poolSymbol}
             </p>
             <p>Policy status: registered and executed</p>
-            <a
-              href={etherscanTxUrl(execution.execution.txHash)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View on Sepolia Etherscan
-            </a>
+            <ExplorerLink txHash={execution.execution.txHash}>
+              View on explorer
+            </ExplorerLink>
           </div>
         )}
       </section>
@@ -320,13 +318,9 @@ export default function TradePage() {
               <Metric label="Nonce" value={policy.policy.policy.nonce} />
             </div>
             {policy.policy.txHash && (
-              <a
-                href={etherscanTxUrl(policy.policy.txHash)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Policy registration on Etherscan
-              </a>
+              <ExplorerLink txHash={policy.policy.txHash}>
+                Policy registration on explorer
+              </ExplorerLink>
             )}
           </>
         )}
