@@ -1,8 +1,13 @@
 import AddressRow from "../components/AddressRow";
-import ValueRow from "../components/ValueRow";
+import Card from "../components/Card";
+import DataTable, { type DataTableColumn } from "../components/DataTable";
+import Kicker from "../components/Kicker";
+import RiskCallout from "../components/RiskCallout";
+import StatLine from "../components/StatLine";
 import { useTrade } from "../context/TradeContext";
 import { CONTRACTS } from "../lib/contracts";
 import { etherscanAddressUrl } from "../lib/format";
+import { verificationTone } from "../lib/statusTone";
 
 type ContractRow = {
   name: string;
@@ -48,78 +53,108 @@ export default function NetworkPage() {
     },
   ];
 
+  const columns: DataTableColumn<ContractRow>[] = [
+    {
+      key: "name",
+      header: "Contract",
+      render: (row) => row.name,
+    },
+    {
+      key: "expected",
+      header: "Expected",
+      mono: true,
+      render: (row) => row.expected,
+    },
+    {
+      key: "observed",
+      header: "Observed on chain",
+      mono: true,
+      render: (row) => row.observed ?? "not reported",
+    },
+    {
+      key: "state",
+      header: "Check",
+      status: (row) => verificationTone(row.observed, row.expected),
+      render: (row) =>
+        verificationTone(row.observed, row.expected) === "ok"
+          ? "Pass"
+          : "Mismatch",
+    },
+    {
+      key: "explorer",
+      header: "Explorer",
+      render: (row) => (
+        <a
+          className="link"
+          href={etherscanAddressUrl(row.expected)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Etherscan
+        </a>
+      ),
+    },
+  ];
+
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <h1>Network</h1>
-        <p className="muted">{protocol.protocolStatus}</p>
+      <header className="page-head">
+        <Kicker>Network</Kicker>
+        <h1 className="page-title">Deployment</h1>
+        <p className="addr">{protocol.protocolStatus}</p>
       </header>
 
-      <div className="card">
-        <h2>Contract verification</h2>
-        <div className="address-list">
-          {rows.map((row) => {
-            const pass =
-              row.observed?.toLowerCase() === row.expected.toLowerCase();
-            return (
-              <div key={row.name} className="verify-row">
-                <AddressRow name={row.name} address={row.expected as `0x${string}`} />
-                <span className={pass ? "verify-pass" : "verify-fail"}>
-                  {pass ? "Pass" : "Mismatch"}
-                </span>
-                <a
-                  href={etherscanAddressUrl(row.expected)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Etherscan
-                </a>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <Card
+        title="Contract verification"
+        footer="Expected values are compiled into this build. A mismatch keeps swaps disabled."
+      >
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.name}
+          emptyMessage="No contracts configured."
+        />
+      </Card>
 
       <div className="grid">
-        <div className="card">
-          <h2>Authorized signer</h2>
-          <AddressRow
-            name="Signer"
-            address={deployment.authorizedSigner}
-          />
-        </div>
-        <div className="card">
-          <h2>Backend</h2>
-          <ValueRow label="Health">{backend.healthState}</ValueRow>
-          <ValueRow label="Monitor">
+        <Card title="Authorized signer">
+          <AddressRow name="Signer" address={deployment.authorizedSigner} />
+        </Card>
+
+        <Card
+          title="Backend"
+          footer={
+            monitor?.lastCheckedBlock === undefined
+              ? "The backend has not reported a scanned block yet."
+              : `The monitor has scanned Sepolia up to block ${monitor.lastCheckedBlock.toLocaleString()}. A block number that stops advancing means the backend monitor is stalled.`
+          }
+        >
+          <StatLine label="Health">{backend.healthState}</StatLine>
+          <StatLine label="Monitor" mono>
             {monitor ? monitor.status : "unknown"}
-          </ValueRow>
-          <ValueRow label="Last checked block">
+          </StatLine>
+          <StatLine label="Last checked block" mono>
             {monitor?.lastCheckedBlock === undefined
               ? "not reported"
               : monitor.lastCheckedBlock.toLocaleString()}
-          </ValueRow>
-          <ValueRow label="Policy signing">
+          </StatLine>
+          <StatLine label="Policy signing">
             {backend.health?.policySigningEnabled ? "enabled" : "disabled"}
-          </ValueRow>
-          <p className="muted" role="status" aria-live="polite">
-            {monitor?.lastCheckedBlock === undefined
-              ? "The backend has not reported a scanned block yet."
-              : `The monitor has scanned Sepolia up to block ${monitor.lastCheckedBlock.toLocaleString()}. A block number that stops advancing means the backend monitor is stalled.`}
-          </p>
-        </div>
+          </StatLine>
+        </Card>
       </div>
 
-      <div className="card">
-        <h2>Registry owner</h2>
+      <Card title="Registry owner">
         <AddressRow name="Owner" address={deployment.registryOwner} />
         {!protocol.hasAuthorization && (
-          <p className="warning">
-            Pool authorization and registry consumer do not match. Swaps stay
-            disabled until configuration is aligned.
-          </p>
+          <div className="callout-slot">
+            <RiskCallout heading="Authorization mismatch">
+              Pool authorization and registry consumer do not match. Swaps stay
+              disabled until configuration is aligned.
+            </RiskCallout>
+          </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
