@@ -8,7 +8,7 @@ The Network page is the operator-facing view of whether the app is pointed at th
 
 ### Contract verification
 
-Six rows, each with a name, an expected address, an observed address and a pass or mismatch verdict ([frontend/src/pages/NetworkPage.tsx:17](../../frontend/src/pages/NetworkPage.tsx#L17)).
+Six rows, each with a name, an expected address, an observed address and a pass or mismatch verdict ([frontend/src/pages/NetworkPage.tsx:18](../../frontend/src/pages/NetworkPage.tsx#L18)).
 
 | Row | Expected | Observed from | Can this row ever fail |
 | --- | --- | --- | --- |
@@ -34,13 +34,13 @@ Both feed the readiness chain. A failure in either blocks policy creation and ex
 
 ### Backend health
 
-The page shows `healthState`, the monitor status, the last checked block and whether policy signing is enabled ([frontend/src/pages/NetworkPage.tsx:90](../../frontend/src/pages/NetworkPage.tsx#L90)).
+The page shows `healthState`, the monitor status, the last checked block and whether policy signing is enabled ([frontend/src/pages/NetworkPage.tsx:92](../../frontend/src/pages/NetworkPage.tsx#L92)).
 
-The last-checked-block row carries an explicit warning that a number that stops advancing means the monitor is stalled ([frontend/src/pages/NetworkPage.tsx:114](../../frontend/src/pages/NetworkPage.tsx#L114)). That is the only place in the UI where a stalled monitor is visible.
+The last-checked-block row carries an explicit warning that a number that stops advancing means the monitor is stalled ([frontend/src/pages/NetworkPage.tsx:105](../../frontend/src/pages/NetworkPage.tsx#L105)). That is the only place in the UI where a stalled monitor is visible.
 
 ### Registry owner
 
-A single row showing the registry owner, plus a warning when the pool authorization and registry consumer disagree ([frontend/src/pages/NetworkPage.tsx:123](../../frontend/src/pages/NetworkPage.tsx#L123)).
+A single row showing the registry owner, plus a warning when the pool authorization and registry consumer disagree ([frontend/src/pages/NetworkPage.tsx:114](../../frontend/src/pages/NetworkPage.tsx#L114)).
 
 ## What it depends on
 

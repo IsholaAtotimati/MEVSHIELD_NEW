@@ -33,7 +33,7 @@ Execution is a two-transaction flow:
 
 Both transactions verify the signature. The registration step is not a trust anchor; it is a cache.
 
-The signing key lives in the backend process, loaded from `SIGNER_PRIVATE_KEY`, and the derived address must equal the on-chain `authorizedSigner` ([backend/src/config/runtimeConfig.ts:192](../../backend/src/config/runtimeConfig.ts#L192)).
+The signing key lives in the backend process, loaded from `SIGNER_PRIVATE_KEY`, and the derived address must equal the on-chain `authorizedSigner` ([backend/src/config/runtimeConfig.ts:196](../../backend/src/config/runtimeConfig.ts#L196)).
 
 ## Consequences
 

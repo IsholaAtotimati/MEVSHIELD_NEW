@@ -62,7 +62,7 @@ All six are required. A missing or malformed value throws at startup.
 | `PROTECTED_POOL_HOOK` | required | none | Hook address in the pool key | Must equal the pinned hook `0xd15E…0080` |
 | `PROTECTED_POOL_ID` | required | none | 32-byte pool id | Must be 32-byte hex, and must equal the id recomputed from the other five values. The derived id is then compared to the pinned id |
 
-The whole pool block is compared against `EXPECTED_PROTECTED_POOL` ([backend/src/config/runtimeConfig.ts:91](../../backend/src/config/runtimeConfig.ts#L91)). Editing one variable to point at a different pool fails startup rather than serving a mismatch.
+The whole pool block is compared against `EXPECTED_PROTECTED_POOL` ([backend/src/config/runtimeConfig.ts:97](../../backend/src/config/runtimeConfig.ts#L97)). Editing one variable to point at a different pool fails startup rather than serving a mismatch.
 
 ### Signing
 
@@ -84,7 +84,7 @@ The whole pool block is compared against `EXPECTED_PROTECTED_POOL` ([backend/src
 | `MEVSHIELD_HOOK_ADDRESS` | alias | none | Second name for the hook | Same as above |
 | `ROUTER_ADDRESS` / `MEVSHIELD_ROUTER` | optional for the monitor | none | Router address used in `swap_confirmed` when the receipt has no `to` | A malformed value throws at startup. Reuses the same variables as the pinned router check |
 
-`RAILWAY_ENVIRONMENT_NAME` is not set by this project. It is read only to veto demo mode, and is present on Railway deployments automatically ([backend/src/config/runtimeConfig.ts:141](../../backend/src/config/runtimeConfig.ts#L141)).
+`RAILWAY_ENVIRONMENT_NAME` is not set by this project. It is read only to veto demo mode, and is present on Railway deployments automatically ([backend/src/config/runtimeConfig.ts:149](../../backend/src/config/runtimeConfig.ts#L149)).
 
 ## Contract and deployment variables
 

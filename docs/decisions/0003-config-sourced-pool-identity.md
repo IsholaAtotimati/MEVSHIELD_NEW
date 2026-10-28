@@ -26,7 +26,7 @@ So the getters never existed. The premise of option 1 was false.
 
 Read pool identity from configuration.
 
-- Backend: the six `PROTECTED_POOL_*` variables, validated at startup, with the pool id recomputed from the pool key and compared both to the configured value and to a pinned constant ([backend/src/config/runtimeConfig.ts:63](../../backend/src/config/runtimeConfig.ts#L63)).
+- Backend: the six `PROTECTED_POOL_*` variables, validated at startup, with the pool id recomputed from the pool key and compared both to the configured value and to a pinned constant ([backend/src/config/runtimeConfig.ts:69](../../backend/src/config/runtimeConfig.ts#L69)).
 - Frontend: `SWAP_POOL_KEY` and `SWAP_POOL_ID` derived from token addresses plus the fee, tick spacing and hook constant, with `SWAP_POOL_ID` computed by `calculatePoolId` rather than hard-coded ([frontend/src/config/swapPool.ts:38](../../frontend/src/config/swapPool.ts#L38)).
 - No new getters were added to the router.
 

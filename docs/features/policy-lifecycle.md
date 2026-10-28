@@ -36,7 +36,7 @@ There is no on-chain record of the signed-but-unregistered state. A signature th
 3. The registry rejects a zero pool id, a zero trader, an expiry at or before the current time, and a reused `(trader, nonce)` pair.
 4. The registry computes `policyId = keccak256(abi.encode(poolId, trader, nonce))`, stores the record, sets the registration flag, and emits `PolicyRegistered`.
 
-The frontend performs this call with the ten fields and the signature it received ([frontend/src/hooks/usePolicy.ts:396](../../frontend/src/hooks/usePolicy.ts#L396)), then waits for the receipt and confirms with `isRegistered` before treating the policy as live ([frontend/src/hooks/usePolicy.ts:443](../../frontend/src/hooks/usePolicy.ts#L443)).
+The frontend performs this call with the ten fields and the signature it received ([frontend/src/hooks/usePolicy.ts:372](../../frontend/src/hooks/usePolicy.ts#L372)), then waits for the receipt and confirms with `isRegistered` before treating the policy as live ([frontend/src/hooks/usePolicy.ts:422](../../frontend/src/hooks/usePolicy.ts#L422)).
 
 Because registration is permissionless, a third party may register a signature they obtained. That is not a vulnerability: the registry records exactly the signed policy, and the only actor who can use it is one who can present a matching policy at swap time, which requires the same signature. The registration only costs gas.
 
@@ -64,7 +64,7 @@ Three read paths exist.
 | `isRegistered(trader, nonce)` | Registry | Whether the pair was registered |
 | `isConsumed(trader, nonce)` | Registry | Whether the pair was consumed |
 
-The Policies page accepts a policy id and reports status, trader, nonce, minimum output, max loss and max fee ([frontend/src/pages/PoliciesPage.tsx:23](../../frontend/src/pages/PoliciesPage.tsx#L23)). Status is derived: consumed if `isConsumed`, else expired if `expiry` is in the past, else active. The page formats the minimum output in USDC decimals regardless of direction ([frontend/src/pages/PoliciesPage.tsx:49](../../frontend/src/pages/PoliciesPage.tsx#L49)), so a WETH-direction minimum is displayed at the wrong scale.
+The Policies page accepts a policy id and reports status, trader, nonce, minimum output, max loss and max fee ([frontend/src/pages/PoliciesPage.tsx:20](../../frontend/src/pages/PoliciesPage.tsx#L20)). Status is derived: consumed if `isConsumed`, else expired if `expiry` is in the past, else active. The page formats the minimum output in USDC decimals regardless of direction ([frontend/src/pages/PoliciesPage.tsx:37](../../frontend/src/pages/PoliciesPage.tsx#L37)), so a WETH-direction minimum is displayed at the wrong scale.
 
 ## Events
 
@@ -97,8 +97,8 @@ There is no event for consumption. A consumer must read `isConsumed` to learn wh
 - **The signer can be retargeted.** `setAuthorizedSigner` is also a single owner call. Rotating it invalidates every outstanding signed policy, including registered ones, because `authorize` re-verifies the signature.
 - **No caller authentication on signing.** Any client that reaches the backend can request a signature when signing is enabled. See [API reference](../api/reference.md#post-policy).
 - **No rate limit.** A caller may request signatures without bound.
-- **The signed trader is the router, not the user.** `trader` must equal the configured router ([backend/src/server.ts:189](../../backend/src/server.ts#L189)), and the hook requires `policy.trader == sender` where `sender` is the router. So every policy names the same trader. Per-user identity is not in the policy at all.
-- **Local defaults are not used.** The Policies page stores max loss and max fee in `localStorage`, but those values are never sent to the backend; the backend computes them from its own formula ([frontend/src/pages/PoliciesPage.tsx:118](../../frontend/src/pages/PoliciesPage.tsx#L118)).
+- **The signed trader is the router, not the user.** `trader` must equal the configured router ([backend/src/server.ts:212](../../backend/src/server.ts#L212)), and the hook requires `policy.trader == sender` where `sender` is the router. So every policy names the same trader. Per-user identity is not in the policy at all.
+- **Local defaults are not used.** The Policies page stores max loss and max fee in `localStorage`, but those values are never sent to the backend; the backend computes them from its own formula ([frontend/src/pages/PoliciesPage.tsx:107](../../frontend/src/pages/PoliciesPage.tsx#L107)).
 - **The UI expiry exceeds the backend ceiling.** See [data model](../architecture/data-model.md#nonce-lifecycle).
 - **No pagination or index of policies.** Policies are found by id or by scanning `PolicyRegistered` logs.
 

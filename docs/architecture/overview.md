@@ -92,8 +92,8 @@ sequenceDiagram
 There are five boundaries worth naming.
 
 1. Wallet to chain. The user signs `registerPolicy` and `executeSwap`. The router sets `payer` to `msg.sender` ([src/MEVShieldRouter.sol:79](../../src/MEVShieldRouter.sol#L79)) and accepts a separate `recipient` argument that the caller chooses. The policy does not cover payer or recipient.
-2. Backend to chain. The backend signs the policy. That signature is the only thing that makes a policy registrable and authorizable. The signing key lives in an in-process wallet built from `SIGNER_PRIVATE_KEY` at startup ([backend/src/config/runtimeConfig.ts:194](../../backend/src/config/runtimeConfig.ts#L194)).
-3. Browser to backend. The backend applies no caller authentication. CORS is restricted to one origin ([backend/src/server.ts:85](../../backend/src/server.ts#L85)) but that is a browser control, not a server-side authorization check.
+2. Backend to chain. The backend signs the policy. That signature is the only thing that makes a policy registrable and authorizable. The signing key lives in an in-process wallet built from `SIGNER_PRIVATE_KEY` at startup ([backend/src/config/runtimeConfig.ts:198](../../backend/src/config/runtimeConfig.ts#L198)).
+3. Browser to backend. The backend applies no caller authentication. CORS is restricted to one origin ([backend/src/server.ts:86](../../backend/src/server.ts#L86)) but that is a browser control, not a server-side authorization check.
 4. Hook to PoolManager. `beforeSwap` is guarded by `onlyPoolManager` ([src/MEVShieldHook.sol:31](../../src/MEVShieldHook.sol#L31)). The hook cannot be called by arbitrary accounts.
 5. Router to PoolManager. `unlockCallback` is guarded by an explicit `msg.sender == poolManager` check ([src/MEVShieldRouter.sol:96](../../src/MEVShieldRouter.sol#L96)).
 
@@ -174,7 +174,7 @@ Off-chain code produces and grades inputs. It cannot prevent a transaction that 
 - Risk estimation runs in the backend as a closed-form function ([backend/src/risk/riskEngine.ts:12](../../backend/src/risk/riskEngine.ts#L12)). Every non-zero amount produces `estimatedLoss = amount / 1000` and `estimatedFee = amount / 10000`, and `maxLoss` and `maxFee` are twice those values. `riskLevel` is always `LOW`. The response carries a disclaimer stating the figures are not a live measurement ([backend/src/risk/riskPreview.ts:6](../../backend/src/risk/riskPreview.ts#L6)).
 - Policy signing runs in the backend and refuses a pool id that is not the pinned protected pool ([backend/src/policy/policySigning.ts:24](../../backend/src/policy/policySigning.ts#L24)).
 - Readiness gating runs in the frontend and decides whether the UI will offer the sign and execute steps ([frontend/src/lib/protectedQuote.ts:310](../../frontend/src/lib/protectedQuote.ts#L310)).
-- Configuration pinning runs in the backend at startup and refuses to start on a chain, verifier, router or pool that does not match the pinned Sepolia deployment ([backend/src/config/runtimeConfig.ts:150](../../backend/src/config/runtimeConfig.ts#L150)).
+- Configuration pinning runs in the backend at startup and refuses to start on a chain, verifier, router or pool that does not match the pinned Sepolia deployment ([backend/src/config/runtimeConfig.ts:158](../../backend/src/config/runtimeConfig.ts#L158)).
 
 The frontend gates are advisory in the strict sense: they stop this UI from submitting, and nothing else. A user with a valid signed policy can bypass the UI entirely.
 
@@ -186,12 +186,12 @@ The deployed Sepolia addresses are recorded twice, once in the frontend and once
 | --- | --- | --- |
 | PoolManager | `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543` | [frontend/src/lib/contracts.ts:20](../../frontend/src/lib/contracts.ts#L20) |
 | PolicyRegistry | `0xB2897da1CfC0c73C3983221a87C27586D1cE1c9E` | [frontend/src/lib/contracts.ts:23](../../frontend/src/lib/contracts.ts#L23) |
-| PolicyVerifier | `0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f` | [backend/src/config/runtimeConfig.ts:6](../../backend/src/config/runtimeConfig.ts#L6) |
+| PolicyVerifier | `0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f` | [backend/src/config/runtimeConfig.ts:12](../../backend/src/config/runtimeConfig.ts#L12) |
 | PolicyAuthorization | `0xefC9bc21f1ab3564232a3216f0e45d5caE3Bd7c5` | [frontend/src/lib/contracts.ts:28](../../frontend/src/lib/contracts.ts#L28) |
 | MEVShieldHook | `0xd15e4fdd391a68c2f1c385d1a819117a3ad40080` | [frontend/src/lib/contracts.ts:34](../../frontend/src/lib/contracts.ts#L34) |
-| MEVShieldRouter | `0x633282608B2fc66cD7572f5eF58e804063aa150D` | [backend/src/config/runtimeConfig.ts:8](../../backend/src/config/runtimeConfig.ts#L8) |
-| Authorized signer | `0x016B78a30CE176EF0B90c122e8677e13aAB2A815` | [backend/src/config/runtimeConfig.ts:4](../../backend/src/config/runtimeConfig.ts#L4) |
-| Protected pool id | `0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602` | [backend/src/config/runtimeConfig.ts:17](../../backend/src/config/runtimeConfig.ts#L17) |
+| MEVShieldRouter | `0x633282608B2fc66cD7572f5eF58e804063aa150D` | [backend/src/config/runtimeConfig.ts:20](../../backend/src/config/runtimeConfig.ts#L20) |
+| Authorized signer | `0x016B78a30CE176EF0B90c122e8677e13aAB2A815` | [backend/src/config/runtimeConfig.ts:10](../../backend/src/config/runtimeConfig.ts#L10) |
+| Protected pool id | `0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602` | [backend/src/config/runtimeConfig.ts:23](../../backend/src/config/runtimeConfig.ts#L23) |
 
 The router exposes only `poolManager()` as an immutable getter. It has no `protectedPoolId()` or `protectedHook()` function, and never did in any committed revision. Any component that needs the protected pool id or hook address reads it from configuration. See [ADR 0003](../decisions/0003-config-sourced-pool-identity.md).
 

@@ -30,15 +30,15 @@ Pinned in source:
 | `EXPECTED_SEPOLIA_ROUTER` | `0x633282608B2fc66cD7572f5eF58e804063aa150D` |
 | `EXPECTED_PROTECTED_POOL` | the WETH/USDC pool key and pool id `0x9275…b602` |
 
-Declared at [backend/src/config/runtimeConfig.ts:3](../../backend/src/config/runtimeConfig.ts#L3) to [backend/src/config/runtimeConfig.ts:16](../../backend/src/config/runtimeConfig.ts#L16).
+Declared at [backend/src/config/runtimeConfig.ts:9](../../backend/src/config/runtimeConfig.ts#L9) to [backend/src/config/runtimeConfig.ts:22](../../backend/src/config/runtimeConfig.ts#L22).
 
-Enforced in `loadBackendConfig`, which throws for a wrong chain id, a missing or malformed pool variable, a pool id that does not match the pool key, a pool key that does not match the pin, a wrong verifier, a wrong router, a missing signer key when signing is enabled, and a signer key whose address does not match the pin ([backend/src/config/runtimeConfig.ts:149](../../backend/src/config/runtimeConfig.ts#L149)).
+Enforced in `loadBackendConfig`, which throws for a wrong chain id, a missing or malformed pool variable, a pool id that does not match the pool key, a pool key that does not match the pin, a wrong verifier, a wrong router, a missing signer key when signing is enabled, and a signer key whose address does not match the pin ([backend/src/config/runtimeConfig.ts:157](../../backend/src/config/runtimeConfig.ts#L157)).
 
 There is no override flag. Two aliases exist per address so that old environment files keep working, but every alias is checked against the same pin.
 
-Demo mode is separately closed: it requires `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true`, `NODE_ENV` not `production`, and `RAILWAY_ENVIRONMENT_NAME` unset ([backend/src/config/runtimeConfig.ts:137](../../backend/src/config/runtimeConfig.ts#L137)). A single flag cannot turn on demo behaviour on a hosted deployment.
+Demo mode is separately closed: it requires `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true`, `NODE_ENV` not `production`, and `RAILWAY_ENVIRONMENT_NAME` unset ([backend/src/config/runtimeConfig.ts:145](../../backend/src/config/runtimeConfig.ts#L145)). A single flag cannot turn on demo behaviour on a hosted deployment.
 
-The signing key is read only when signing is enabled, so a read-only deployment does not need secret material in its environment ([backend/src/config/runtimeConfig.ts:191](../../backend/src/config/runtimeConfig.ts#L191)).
+The signing key is read only when signing is enabled, so a read-only deployment does not need secret material in its environment ([backend/src/config/runtimeConfig.ts:195](../../backend/src/config/runtimeConfig.ts#L195)).
 
 ## Consequences
 
