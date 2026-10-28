@@ -62,10 +62,44 @@ test("rejects a syntactically valid but unconfigured pool ID before signing", ()
 });
 
 test("rejects missing, zero, or malformed minimum output", () => {
-  for (const minAmountOut of [undefined, "0", "-1", "1.5", "not-a-number"]) {
+  for (const minAmountOut of [
+    undefined,
+    "",
+    "0",
+    "-1",
+    "1.5",
+    "not-a-number",
+    "01",
+  ]) {
     const request = { ...validRequest, minAmountOut };
     assert.equal(PolicyRequestSchema.safeParse(request).success, false);
   }
+});
+
+test("rejects an overlong minimum output", () => {
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      minAmountOut: "1".repeat(100),
+    }).success,
+    false,
+  );
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      minAmountOut: "1".repeat(79),
+    }).success,
+    false,
+  );
+});
+
+test("accepts a 78-digit minimum output", () => {
+  const minAmountOut = `1${"0".repeat(77)}`;
+  assert.equal(minAmountOut.length, 78);
+  assert.equal(
+    PolicyRequestSchema.safeParse({ ...validRequest, minAmountOut }).success,
+    true,
+  );
 });
 
 test("rejects zero amountSpecified and malformed numeric strings", () => {
