@@ -8,6 +8,7 @@ const backendDirectory = fileURLToPath(new URL("../../", import.meta.url));
 function runMonitorScenario(
   chainId: string,
   routerMode: "valid" | "missing" | "malformed" = "valid",
+  extraEnv: Record<string, string> = {},
 ) {
   const scenario = `
     import assert from "node:assert/strict";
@@ -97,6 +98,7 @@ function runMonitorScenario(
         ...process.env,
         TEST_CHAIN_ID: chainId,
         TEST_ROUTER_MODE: routerMode,
+        ...extraEnv,
       },
       timeout: 20_000,
     },
@@ -164,4 +166,35 @@ test("Sepolia RPC chain continues scanning configured registry and hook logs", (
   ]);
   assert.equal(Array.isArray(filter.topics?.[0]), true);
   assert.equal((filter.topics?.[0] as string[]).length, 2);
+});
+
+test("the local chain gate moves the monitor to chain 31337", () => {
+  const result = runMonitorScenario("0x7a69", "valid", {
+    MEVSHIELD_LOCAL_CHAIN_ENABLED: "true",
+    NODE_ENV: "development",
+  });
+
+  assert.equal(result.status, "connected");
+  const methods = result.requests.map(({ method }) => method);
+  assert.ok(methods.includes("eth_getLogs"));
+});
+
+test("without the local gate an anvil RPC is still rejected as the wrong chain", () => {
+  const result = runMonitorScenario("0x7a69", "valid", {
+    MEVSHIELD_LOCAL_CHAIN_ENABLED: "false",
+    NODE_ENV: "development",
+  });
+
+  assert.equal(result.status, "error");
+  assert.deepEqual(result.methodsAfterWait, ["eth_chainId"]);
+});
+
+test("a production runtime cannot monitor the local chain", () => {
+  const result = runMonitorScenario("0x7a69", "valid", {
+    MEVSHIELD_LOCAL_CHAIN_ENABLED: "true",
+    NODE_ENV: "production",
+  });
+
+  assert.equal(result.status, "error");
+  assert.deepEqual(result.methodsAfterWait, ["eth_chainId"]);
 });

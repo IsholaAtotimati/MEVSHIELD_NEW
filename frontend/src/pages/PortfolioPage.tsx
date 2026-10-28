@@ -3,6 +3,7 @@ import type { Address } from "viem";
 
 import AllowanceCard from "../components/AllowanceCard";
 import ValueRow from "../components/ValueRow";
+import { TOKEN_NETWORK_LABEL } from "../config/chain";
 import { SWAP_TOKENS, WETH9_ADDRESS } from "../config/swapPool";
 import { useTrade } from "../context/TradeContext";
 import { erc20Abi, weth9Abi } from "../lib/abis";
@@ -191,7 +192,7 @@ export default function PortfolioPage() {
     <div className="page-stack">
       <header className="page-header">
         <h1>Portfolio</h1>
-        <p className="muted">Sepolia ETH, WETH, and USDC. No USD values.</p>
+        <p className="muted">{TOKEN_NETWORK_LABEL} ETH, WETH, and USDC. No USD values.</p>
       </header>
 
       {!wallet.account ? (

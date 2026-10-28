@@ -13,6 +13,27 @@ export const EXPECTED_SEPOLIA_VERIFIER =
   "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f";
 export const EXPECTED_SEPOLIA_ROUTER =
   "0x633282608B2fc66cD7572f5eF58e804063aa150D";
+
+/**
+ * Local Docker chain (anvil). Only reachable when `isLocalChainEnabled` is
+ * true, which requires an explicit opt-in flag plus a non-production runtime.
+ * See `docs/runbook/local-docker.md`.
+ */
+export const LOCAL_CHAIN_ID = 31337;
+
+/**
+ * Deterministic addresses produced by `script/DeployLocal.s.sol` from a fresh
+ * anvil state. Pinning them keeps the local path fail-closed: a deploy that
+ * drifts from this expectation stops the stack instead of silently pointing
+ * the backend at a different contract.
+ */
+export const EXPECTED_LOCAL_SIGNER =
+  "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7";
+export const EXPECTED_LOCAL_VERIFIER =
+  "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
+export const EXPECTED_LOCAL_ROUTER =
+  "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
+
 export const EXPECTED_PROTECTED_POOL = {
   currency0: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
   currency1: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
@@ -29,6 +50,15 @@ export type ProtectedPoolConfig = {
   tickSpacing: number;
   hooks: string;
   poolId: string;
+};
+
+export type ProtectedPoolValidationOptions = {
+  /**
+   * Accept a structurally valid pool on the local chain instead of requiring
+   * the pinned Sepolia WETH/USDC pool. Only ever set by `loadBackendConfig`
+   * after the local chain gate has already passed.
+   */
+  allowUnpinnedPool?: boolean;
 };
 
 const PROTECTED_POOL_KEY_ABI =
@@ -65,7 +95,9 @@ function configuredInteger(value: string | undefined, name: string): number {
 export function validateProtectedPoolConfig(
   env: NodeJS.ProcessEnv,
   chainId: number,
+  options: ProtectedPoolValidationOptions = {},
 ): ProtectedPoolConfig {
+  const allowUnpinnedPool = options.allowUnpinnedPool === true;
   const currency0 = configuredAddress(env.PROTECTED_POOL_CURRENCY0, "PROTECTED_POOL_CURRENCY0");
   const currency1 = configuredAddress(env.PROTECTED_POOL_CURRENCY1, "PROTECTED_POOL_CURRENCY1");
   const fee = configuredInteger(env.PROTECTED_POOL_FEE, "PROTECTED_POOL_FEE");
@@ -76,7 +108,15 @@ export function validateProtectedPoolConfig(
   const hooks = configuredAddress(env.PROTECTED_POOL_HOOK, "PROTECTED_POOL_HOOK");
   const configuredPoolId = requiredValue(env.PROTECTED_POOL_ID, "PROTECTED_POOL_ID");
 
-  if (chainId !== SEPOLIA_CHAIN_ID) {
+  if (allowUnpinnedPool) {
+    // The local chain is a structural check only. The Sepolia identity pin is
+    // deliberately not applied, but every internal consistency rule still is.
+    if (chainId !== LOCAL_CHAIN_ID) {
+      throw new Error(
+        "Unpinned protected-pool configuration is only valid for the local chain ID 31337.",
+      );
+    }
+  } else if (chainId !== SEPOLIA_CHAIN_ID) {
     throw new Error("Protected-pool configuration is only valid for Sepolia chain ID 11155111.");
   }
   if (BigInt(currency0) >= BigInt(currency1)) {
@@ -92,6 +132,10 @@ export function validateProtectedPoolConfig(
   );
   if (derivedPoolId.toLowerCase() !== configuredPoolId.toLowerCase()) {
     throw new Error("PROTECTED_POOL_ID does not match the configured protected-pool key.");
+  }
+
+  if (allowUnpinnedPool) {
+    return { ...poolKey, poolId: derivedPoolId };
   }
 
   const matchesExpected =
@@ -150,6 +194,53 @@ export function isLocalSepoliaDemoEnabled(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+/**
+ * Local-chain gate for the Docker stack.
+ *
+ * Three independent conditions must hold, and the production pin is never
+ * widened: `MEVSHIELD_LOCAL_CHAIN_ENABLED` must be the literal `"true"`,
+ * `NODE_ENV` must not be `production`, and no Railway environment marker may be
+ * present. Railway deploys therefore cannot reach this path even if the flag
+ * were set by mistake, and the production image defaults to `NODE_ENV=production`.
+ */
+export function isLocalChainEnabled(env: NodeJS.ProcessEnv): boolean {
+  return (
+    env.MEVSHIELD_LOCAL_CHAIN_ENABLED === "true" &&
+    env.NODE_ENV !== "production" &&
+    !env.RAILWAY_ENVIRONMENT_NAME
+  );
+}
+
+export type BackendChainExpectations = {
+  signer: string;
+  verifier: string;
+  router: string;
+  isLocal: boolean;
+};
+
+/**
+ * Resolves which deployment the backend is pinned to. Sepolia stays the
+ * default; the local set is only returned when the explicit gate is open.
+ */
+export function resolveChainExpectations(
+  env: NodeJS.ProcessEnv,
+): BackendChainExpectations {
+  if (isLocalChainEnabled(env)) {
+    return {
+      signer: EXPECTED_LOCAL_SIGNER,
+      verifier: EXPECTED_LOCAL_VERIFIER,
+      router: EXPECTED_LOCAL_ROUTER,
+      isLocal: true,
+    };
+  }
+  return {
+    signer: EXPECTED_AUTHORIZED_SIGNER,
+    verifier: EXPECTED_SEPOLIA_VERIFIER,
+    router: EXPECTED_SEPOLIA_ROUTER,
+    isLocal: false,
+  };
+}
+
 export type LoadBackendConfigOptions = {
   requireSigner?: boolean;
 };
@@ -161,33 +252,53 @@ export function loadBackendConfig(
   options: LoadBackendConfigOptions = {},
 ) {
   const requireSigner = options.requireSigner ?? true;
+  const localChain = isLocalChainEnabled(env);
+  const chainExpectations = resolveChainExpectations(env);
+  const effectiveSigner = localChain
+    ? EXPECTED_LOCAL_SIGNER
+    : expectedSignerAddress;
+  const effectiveRouter = localChain
+    ? EXPECTED_LOCAL_ROUTER
+    : expectedRouterAddress;
   const chainIdValue = Number(firstConfigured(env.CHAIN_ID));
 
   if (Number.isNaN(chainIdValue)) {
     throw new Error(
-      "CHAIN_ID must be set to 11155111 for the Sepolia deployment.",
+      localChain
+        ? "CHAIN_ID must be set to 31337 for the local Docker deployment."
+        : "CHAIN_ID must be set to 11155111 for the Sepolia deployment.",
     );
   }
 
-  if (chainIdValue !== SEPOLIA_CHAIN_ID) {
+  if (localChain) {
+    if (chainIdValue !== LOCAL_CHAIN_ID) {
+      throw new Error(
+        "CHAIN_ID must be 31337 when MEVSHIELD_LOCAL_CHAIN_ENABLED=true.",
+      );
+    }
+  } else if (chainIdValue !== SEPOLIA_CHAIN_ID) {
     throw new Error(
       "CHAIN_ID must be 11155111 for the Sepolia deployment.",
     );
   }
 
-  const protectedPool = validateProtectedPoolConfig(env, chainIdValue);
+  const protectedPool = validateProtectedPoolConfig(env, chainIdValue, {
+    allowUnpinnedPool: localChain,
+  });
 
   const verifierAddress = resolveVerifierAddress(env);
 
+  const verifierExpectation = chainExpectations.verifier;
+
   if (!verifierAddress || !isAddress(verifierAddress)) {
     throw new Error(
-      `Invalid verifier configuration. Expected Sepolia PolicyVerifier ${EXPECTED_SEPOLIA_VERIFIER}.`,
+      `Invalid verifier configuration. Expected ${localChain ? "local" : "Sepolia"} PolicyVerifier ${verifierExpectation}.`,
     );
   }
 
-  if (getAddress(verifierAddress).toLowerCase() !== EXPECTED_SEPOLIA_VERIFIER.toLowerCase()) {
+  if (getAddress(verifierAddress).toLowerCase() !== verifierExpectation.toLowerCase()) {
     throw new Error(
-      `Invalid verifier configuration. Expected Sepolia PolicyVerifier ${EXPECTED_SEPOLIA_VERIFIER}.`,
+      `Invalid verifier configuration. Expected ${localChain ? "local" : "Sepolia"} PolicyVerifier ${verifierExpectation}.`,
     );
   }
 
@@ -204,11 +315,11 @@ export function loadBackendConfig(
       throw new Error("SIGNER_PRIVATE_KEY is invalid.");
     }
     const signerAddress = signerWallet.address.toLowerCase();
-    const expectedSigner = expectedSignerAddress.toLowerCase();
+    const expectedSigner = effectiveSigner.toLowerCase();
 
     if (signerAddress !== expectedSigner) {
       throw new Error(
-        `Configured SIGNER_PRIVATE_KEY does not match the authorized signer ${expectedSignerAddress}.`,
+        `Configured SIGNER_PRIVATE_KEY does not match the authorized signer ${effectiveSigner}.`,
       );
     }
   }
@@ -219,9 +330,9 @@ export function loadBackendConfig(
     throw new Error("MEVSHIELD_ROUTER is not configured or is not a valid address.");
   }
   const normalizedRouterAddress = getAddress(routerAddress);
-  if (normalizedRouterAddress.toLowerCase() !== expectedRouterAddress.toLowerCase()) {
+  if (normalizedRouterAddress.toLowerCase() !== effectiveRouter.toLowerCase()) {
     throw new Error(
-      `Configured router does not match the approved Sepolia router ${expectedRouterAddress}.`,
+      `Configured router does not match the approved ${localChain ? "local" : "Sepolia"} router ${effectiveRouter}.`,
     );
   }
 

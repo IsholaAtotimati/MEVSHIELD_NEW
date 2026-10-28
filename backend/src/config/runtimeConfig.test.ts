@@ -4,9 +4,15 @@ import { Wallet } from "ethers";
 
 import {
   EXPECTED_AUTHORIZED_SIGNER,
+  EXPECTED_LOCAL_ROUTER,
+  EXPECTED_LOCAL_SIGNER,
+  EXPECTED_LOCAL_VERIFIER,
   EXPECTED_PROTECTED_POOL,
   EXPECTED_SEPOLIA_ROUTER,
+  EXPECTED_SEPOLIA_VERIFIER,
+  SEPOLIA_CHAIN_ID,
   assertConfiguredPoolId,
+  isLocalChainEnabled,
   isLocalSepoliaDemoEnabled,
   loadBackendConfig,
   publicProtectedPoolConfig,
@@ -325,5 +331,149 @@ test("validation errors do not echo the signer private key", () => {
       const message = String(error);
       return message.includes("authorized signer") && !message.includes(secretKey);
     },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Local Docker chain (anvil, 31337)
+//
+// The local allowance must never be reachable from a production configuration,
+// and the Sepolia pin must keep rejecting a local chain when the gate is shut.
+// ---------------------------------------------------------------------------
+
+const LOCAL_ENV_BASE = {
+  NODE_ENV: "development",
+  MEVSHIELD_LOCAL_CHAIN_ENABLED: "true",
+  CHAIN_ID: "31337",
+  // DeployLocal installs signer 0xA11CE on the local verifier.
+  SIGNER_PRIVATE_KEY:
+    "0x00000000000000000000000000000000000000000000000000000000000a11ce",
+  POLICY_VERIFIER_ADDRESS: EXPECTED_LOCAL_VERIFIER,
+  ROUTER_ADDRESS: EXPECTED_LOCAL_ROUTER,
+  // Locally deployed mock tokens from SetupBackendSwap; addresses sort ascending.
+  PROTECTED_POOL_CURRENCY0: "0x610178da211fef7d417bc0e6fed39f05609ad788",
+  PROTECTED_POOL_CURRENCY1: "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
+  PROTECTED_POOL_FEE: "3000",
+  PROTECTED_POOL_TICK_SPACING: "60",
+  PROTECTED_POOL_HOOK: "0x1e2f391574556815ae705895f2728543a7ad4080",
+  PROTECTED_POOL_ID:
+    "0x8d754c8c3f0e991efb877b18bf00b8d0718c2cd8af8f31a35c61de1415e19bf0",
+} as const;
+
+test("local chain gate requires the explicit flag, non-production, and no Railway marker", () => {
+  assert.equal(
+    isLocalChainEnabled({ MEVSHIELD_LOCAL_CHAIN_ENABLED: "true", NODE_ENV: "development" }),
+    true,
+  );
+  assert.equal(
+    isLocalChainEnabled({ MEVSHIELD_LOCAL_CHAIN_ENABLED: "true", NODE_ENV: "production" }),
+    false,
+  );
+  assert.equal(
+    isLocalChainEnabled({
+      MEVSHIELD_LOCAL_CHAIN_ENABLED: "true",
+      NODE_ENV: "development",
+      RAILWAY_ENVIRONMENT_NAME: "production",
+    }),
+    false,
+  );
+  assert.equal(isLocalChainEnabled({ NODE_ENV: "development" }), false);
+  assert.equal(
+    isLocalChainEnabled({ MEVSHIELD_LOCAL_CHAIN_ENABLED: "1", NODE_ENV: "development" }),
+    false,
+  );
+});
+
+test("a local chain 31337 configuration is accepted only with the gate open", () => {
+  const config = loadBackendConfig({ ...LOCAL_ENV_BASE });
+
+  assert.equal(config.chainId, 31337);
+  assert.equal(config.verifierAddress, EXPECTED_LOCAL_VERIFIER);
+  assert.equal(config.routerAddress, EXPECTED_LOCAL_ROUTER);
+  assert.equal(config.signerAddress, EXPECTED_LOCAL_SIGNER);
+  assert.equal(
+    config.protectedPool.poolId,
+    LOCAL_ENV_BASE.PROTECTED_POOL_ID,
+  );
+
+  // Same values with the gate shut must still be rejected by the Sepolia pin.
+  assert.throws(
+    () => loadBackendConfig({ ...LOCAL_ENV_BASE, MEVSHIELD_LOCAL_CHAIN_ENABLED: "false" }),
+    /CHAIN_ID must be 11155111/,
+  );
+  assert.throws(
+    () => loadBackendConfig({ ...LOCAL_ENV_BASE, NODE_ENV: "production" }),
+    /CHAIN_ID must be 11155111/,
+  );
+});
+
+test("the local chain rejects the Sepolia deployment addresses", () => {
+  assert.throws(
+    () => loadBackendConfig({ ...LOCAL_ENV_BASE, POLICY_VERIFIER_ADDRESS: EXPECTED_SEPOLIA_VERIFIER }),
+    /Expected local PolicyVerifier/,
+  );
+  assert.throws(
+    () => loadBackendConfig({ ...LOCAL_ENV_BASE, ROUTER_ADDRESS: EXPECTED_SEPOLIA_ROUTER }),
+    /does not match the approved local router/,
+  );
+});
+
+test("the local chain rejects an arbitrary signer key", () => {
+  const otherKey = "0x2222222222222222222222222222222222222222222222222222222222222222";
+  assert.throws(
+    () => loadBackendConfig({ ...LOCAL_ENV_BASE, SIGNER_PRIVATE_KEY: otherKey }),
+    /authorized signer/,
+  );
+});
+
+test("the local chain rejects a pool id that does not match its pool key", () => {
+  assert.throws(
+    () => loadBackendConfig({
+      ...LOCAL_ENV_BASE,
+      PROTECTED_POOL_ID: `0x${"22".repeat(32)}`,
+    }),
+    /does not match the configured protected-pool key/,
+  );
+});
+
+test("the local chain still requires ascending currency order", () => {
+  assert.throws(
+    () => loadBackendConfig({
+      ...LOCAL_ENV_BASE,
+      PROTECTED_POOL_CURRENCY0: LOCAL_ENV_BASE.PROTECTED_POOL_CURRENCY1,
+      PROTECTED_POOL_CURRENCY1: LOCAL_ENV_BASE.PROTECTED_POOL_CURRENCY0,
+    }),
+    /ascending address order/,
+  );
+});
+
+test("unpinned pool validation cannot be opened for a non-local chain", () => {
+  assert.throws(
+    () => validateProtectedPoolConfig(
+      {
+        PROTECTED_POOL_CURRENCY0: LOCAL_ENV_BASE.PROTECTED_POOL_CURRENCY0,
+        PROTECTED_POOL_CURRENCY1: LOCAL_ENV_BASE.PROTECTED_POOL_CURRENCY1,
+        PROTECTED_POOL_FEE: LOCAL_ENV_BASE.PROTECTED_POOL_FEE,
+        PROTECTED_POOL_TICK_SPACING: LOCAL_ENV_BASE.PROTECTED_POOL_TICK_SPACING,
+        PROTECTED_POOL_HOOK: LOCAL_ENV_BASE.PROTECTED_POOL_HOOK,
+        PROTECTED_POOL_ID: LOCAL_ENV_BASE.PROTECTED_POOL_ID,
+      },
+      SEPOLIA_CHAIN_ID,
+      { allowUnpinnedPool: true },
+    ),
+    /only valid for the local chain ID 31337/,
+  );
+});
+
+test("the Sepolia pin is unchanged when the local gate is closed", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const config = loadBackendConfig(env, signerWallet.address, FIXTURE_ROUTER_ADDRESS);
+  assert.equal(config.chainId, SEPOLIA_CHAIN_ID);
+  assert.equal(config.routerAddress.toLowerCase(), FIXTURE_ROUTER_ADDRESS.toLowerCase());
+
+  // A local deployment address in a Sepolia configuration is still refused.
+  assert.throws(
+    () => loadBackendConfig({ ...env, POLICY_VERIFIER_ADDRESS: EXPECTED_LOCAL_VERIFIER }),
+    /Expected Sepolia PolicyVerifier/,
   );
 });

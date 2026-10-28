@@ -5,13 +5,16 @@ import {
   http,
 } from "viem";
 
-import { SEPOLIA_CHAIN } from "./contracts";
+import { CHAIN, RPC_URL } from "../config/chain";
 
+/**
+ * Read client. The chain and transport come from `config/chain.ts`, which
+ * defaults to Sepolia and only changes when a `VITE_CHAIN_ID` / `VITE_RPC_URL`
+ * is supplied at build time.
+ */
 export const publicClient = createPublicClient({
-  chain: SEPOLIA_CHAIN,
-  transport: http(
-    "https://ethereum-sepolia-rpc.publicnode.com",
-  ),
+  chain: CHAIN,
+  transport: http(RPC_URL),
 });
 
 export function getWalletClient() {
@@ -22,7 +25,7 @@ export function getWalletClient() {
   }
 
   return createWalletClient({
-    chain: SEPOLIA_CHAIN,
+    chain: CHAIN,
     transport: custom(window.ethereum),
   });
 }

@@ -1,9 +1,12 @@
 /**
- * Display formatting for addresses, token amounts, and Sepolia explorer links.
+ * Display formatting for addresses and token amounts.
  *
  * Single responsibility: turn on-chain values into the strings the UI renders.
  * Nothing here fetches, validates a backend body, or compares addresses for
  * gating decisions — those live in `apiValidation.ts` and the hooks.
+ *
+ * This module is deliberately free of `import.meta.env` so the Node test runner
+ * can load it directly. Explorer links live in `explorer.ts`.
  *
  * Consumers: TradePage, PortfolioPage, PoliciesPage, ActivityPage,
  * NetworkPage, SwapInputs, AllowanceCard, TopBar, usePolicy.
@@ -14,14 +17,6 @@ import { formatUnits } from "viem";
 export function shortAddress(address?: string | null): string {
   if (!address) return "—";
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
-export function etherscanTxUrl(txHash: string): string {
-  return `https://sepolia.etherscan.io/tx/${txHash}`;
-}
-
-export function etherscanAddressUrl(address: string): string {
-  return `https://sepolia.etherscan.io/address/${address}`;
 }
 
 /**

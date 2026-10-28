@@ -1,5 +1,6 @@
 import { formatUnits } from "viem";
 
+import { TOKEN_NETWORK_LABEL } from "../config/chain";
 import { formatTokenAmount } from "../lib/format";
 import type { ProtectedQuote } from "../lib/protectedQuote";
 import SwapDirectionButton from "./SwapDirectionButton";
@@ -80,10 +81,10 @@ export default function SwapInputs({
             aria-label="Token to pay"
           >
             <option value="ETH" disabled={outputToken === "ETH"}>
-              ETH (Sepolia)
+              ETH ({TOKEN_NETWORK_LABEL})
             </option>
             <option value="USDC" disabled={outputToken === "USDC"}>
-              USDC (Sepolia)
+              USDC ({TOKEN_NETWORK_LABEL})
             </option>
           </select>
         </div>
@@ -145,10 +146,10 @@ export default function SwapInputs({
             aria-label="Token to receive"
           >
             <option value="ETH" disabled={inputToken === "ETH"}>
-              ETH (Sepolia)
+              ETH ({TOKEN_NETWORK_LABEL})
             </option>
             <option value="USDC" disabled={inputToken === "USDC"}>
-              USDC (Sepolia)
+              USDC ({TOKEN_NETWORK_LABEL})
             </option>
           </select>
         </div>

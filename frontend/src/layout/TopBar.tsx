@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatGwei } from "viem";
 
-import { CHAIN_ID } from "../lib/contracts";
+import { CHAIN_LABEL, CHAIN_NAME } from "../config/chain";
 import { shortAddress } from "../lib/format";
 import { publicClient } from "../lib/viem";
 import { useTrade } from "../context/TradeContext";
@@ -45,12 +45,12 @@ export default function TopBar() {
         </button>
         {wallet.wrongNetwork && (
           <span className="top-bar-warning">
-            Wrong network. Switch to Sepolia.
+            Wrong network. Switch to {CHAIN_NAME}.
           </span>
         )}
       </div>
       <div className="top-bar-group top-bar-meta">
-        <span className="network-tag">Sepolia · {CHAIN_ID}</span>
+        <span className="network-tag">{CHAIN_LABEL}</span>
         <span>Gas estimate: {gasPrice} gwei</span>
         <span
           className={`backend-status backend-status--${backend.healthState}`}

@@ -1,0 +1,33 @@
+# Build context for the backend image (context is ./backend).
+#
+# Anything listed here is excluded from the image build context, which keeps
+# builds fast and guarantees local secrets and artifacts never enter a layer.
+
+# Dependencies are reinstalled inside the image from the lockfile.
+node_modules
+
+# Compiled output is produced inside the image.
+dist
+build
+
+# Local environment files. A real .env must never reach an image.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor, OS and VCS noise.
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Logs and coverage.
+*.log
+npm-debug.log*
+coverage
+.nyc_output
+
+# Test sources are not needed to compile or run the service.
+src/**/*.test.ts
