@@ -590,6 +590,8 @@ The project is experimental and should not be considered production-audited base
 
 No claim of a completed independent security audit is made here. Before handling meaningful user funds, MEVShield requires comprehensive security review, deployment verification, and adversarial testing.
 
+A source review of this repository on 28 October 2026 is recorded in [docs/reviews/2026-10-28-code-review.md](docs/reviews/2026-10-28-code-review.md). That note records the current enforcement boundary. It is not an independent audit.
+
 ---
 
 ## Current Limitations
@@ -602,6 +604,7 @@ The current MVP has important limitations:
 4. **Deployment consistency:** Local source and deployed bytecode must be independently matched before relying on a deployment.
 5. **Policy rollout controls:** Policy execution and minimum-output verification should remain disabled until their deployment and end-to-end checks are complete.
 6. **No production guarantee:** The MVP is not a substitute for an independent audit or a guarantee of profitable or safe swaps.
+7. **Enforcement boundary:** Signed authorization, expiry, and nonce consumption run in the hook. Realized minimum output and the tick-distance cap run in the router. Loss and fee caps are compared to caller-supplied estimates. Details are in the 28 October 2026 source review.
 
 The active Sepolia pool used during earlier development has encountered an invalid operational price state and must not be treated as a healthy pool for further swap testing. Use a newly validated, controlled test environment for subsequent end-to-end work.
 

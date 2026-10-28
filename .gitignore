@@ -9,8 +9,9 @@ node_modules/
 /broadcast/*/11155111/
 /broadcast/**/dry-run/
 
-# Docs
-docs/
+# Local notes stay untracked. Published reviews are committed.
+docs/*
+!docs/reviews/
 
 # Dotenv files - ignore all dotenvs but track examples
 .env
