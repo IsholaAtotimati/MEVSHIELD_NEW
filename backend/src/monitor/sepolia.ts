@@ -12,9 +12,19 @@ import {
   clearPolicyRequest,
   requestIdForPolicy,
 } from "../observability/requestCorrelation.js";
+import { LOCAL_CHAIN_ID, isLocalChainEnabled } from "../config/runtimeConfig.js";
 
-const CHAIN_ID = 11155111;
+const SEPOLIA_CHAIN_ID = 11155111;
 const POLL_INTERVAL_MS = 12_000;
+
+/**
+ * The monitor follows whichever chain the backend is pinned to. On the local
+ * Docker stack that is anvil at 31337, so the scanner accepts it only when the
+ * explicit local-chain gate is open. Otherwise Sepolia remains the only chain.
+ */
+function monitoredChainId(env: NodeJS.ProcessEnv): number {
+  return isLocalChainEnabled(env) ? LOCAL_CHAIN_ID : SEPOLIA_CHAIN_ID;
+}
 
 const registryInterface = new Interface([
   "event PolicyRegistered(bytes32 indexed policyId, bytes32 indexed poolId, address indexed trader, uint256 nonce, uint256 expiry, uint256 maxLoss, uint256 maxFee, uint256 minAmountOut)",
@@ -110,7 +120,9 @@ export function startSepoliaMonitor(): () => SepoliaMonitorSnapshot {
   const hook = getAddress(hookAddress);
   const router = routerAddress ? getAddress(routerAddress) : undefined;
 
-  const provider = new JsonRpcProvider(rpcUrl, CHAIN_ID, {
+  const expectedChainId = monitoredChainId(process.env);
+
+  const provider = new JsonRpcProvider(rpcUrl, expectedChainId, {
     staticNetwork: true,
   });
 
@@ -259,10 +271,10 @@ export function startSepoliaMonitor(): () => SepoliaMonitorSnapshot {
     pollRunning = true;
     try {
       const actualChainId = BigInt(await provider.send("eth_chainId", []));
-      if (actualChainId !== BigInt(CHAIN_ID)) {
+      if (actualChainId !== BigInt(expectedChainId)) {
         updateStatus("error");
         logEvent("error", "sepolia_monitor_wrong_chain", {
-          expectedChainId: CHAIN_ID,
+          expectedChainId,
           actualChainId: actualChainId.toString(),
         });
         stop();
@@ -274,14 +286,14 @@ export function startSepoliaMonitor(): () => SepoliaMonitorSnapshot {
       if (!hasConnected) {
         hasConnected = true;
         logEvent("info", "sepolia_monitor_connected", {
-          chainId: CHAIN_ID,
+          chainId: expectedChainId,
           latestBlock,
           registry,
           hook,
         });
       } else if (status === "error") {
         logEvent("info", "sepolia_monitor_reconnected", {
-          chainId: CHAIN_ID,
+          chainId: expectedChainId,
           latestBlock,
         });
       }
