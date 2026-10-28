@@ -1,4 +1,3 @@
-import { formatUnits } from "viem";
 import { Link } from "react-router-dom";
 
 import { SEPOLIA_DEMO_MODE } from "../config/env";
@@ -10,7 +9,7 @@ import {
   DEMO_MIN_AMOUNT_OUT,
   DEMO_USDC_PER_WETH,
 } from "../lib/protectedQuote";
-import { etherscanTxUrl, shortAddress } from "../lib/format";
+import { etherscanTxUrl, formatBaseUnits, formatBaseUnitsWithSymbol, shortAddress } from "../lib/format";
 import Metric from "../components/Metric";
 
 const SLIPPAGE_PRESETS = [
@@ -178,7 +177,7 @@ export default function TradePage() {
         <p className="amount-conversion">
           Minimum output:{" "}
           {SEPOLIA_DEMO_MODE
-            ? `${formatUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (demo floor)`
+            ? `${formatBaseUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (demo floor)`
             : quoteIsFresh && quote.protectedQuote.status === "available"
               ? (() => {
                   const minimum = calculateMinimumOutput(
@@ -187,7 +186,7 @@ export default function TradePage() {
                   );
                   return minimum === null
                     ? "invalid"
-                    : `${formatUnits(minimum, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol}`;
+                    : `${formatBaseUnits(minimum, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol}`;
                 })()
               : "unavailable until a fresh quote exists"}
         </p>
@@ -252,11 +251,11 @@ export default function TradePage() {
             <h3>Swap receipt</h3>
             <p>
               Received amount: check wallet balance. Signed minimum:{" "}
-              {formatUnits(
-                BigInt(policy.policy.policy.minAmountOut),
+              {formatBaseUnitsWithSymbol(
+                policy.policy.policy.minAmountOut,
                 SWAP_TOKENS[outputToken].decimals,
-              )}{" "}
-              {SWAP_TOKENS[outputToken].poolSymbol}
+                SWAP_TOKENS[outputToken].poolSymbol,
+              )}
             </p>
             <p>Policy status: registered and executed</p>
             <a
@@ -285,22 +284,22 @@ export default function TradePage() {
             <Metric label="Risk level" value={policy.riskPreview.riskLevel} />
             <Metric
               label="Max loss bound"
-              value={formatUnits(
-                BigInt(policy.riskPreview.maxLoss),
+              value={formatBaseUnits(
+                policy.riskPreview.maxLoss,
                 SWAP_TOKENS[inputToken].decimals,
               )}
             />
             <Metric
               label="Max fee bound"
-              value={formatUnits(
-                BigInt(policy.riskPreview.maxFee),
+              value={formatBaseUnits(
+                policy.riskPreview.maxFee,
                 SWAP_TOKENS[inputToken].decimals,
               )}
             />
             <Metric
               label="Estimated loss (model)"
-              value={formatUnits(
-                BigInt(policy.riskPreview.estimatedLoss),
+              value={formatBaseUnits(
+                policy.riskPreview.estimatedLoss,
                 SWAP_TOKENS[inputToken].decimals,
               )}
             />
@@ -312,8 +311,8 @@ export default function TradePage() {
             <div className="risk-grid">
               <Metric
                 label="Signed minimum output"
-                value={formatUnits(
-                  BigInt(policy.policy.policy.minAmountOut),
+                value={formatBaseUnits(
+                  policy.policy.policy.minAmountOut,
                   SWAP_TOKENS[outputToken].decimals,
                 )}
               />

@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Hex } from "viem";
-import { formatUnits } from "viem";
 
 import { SWAP_TOKENS } from "../config/swapPool";
 import { useTrade } from "../context/TradeContext";
 import { loadPolicyDefaults, savePolicyDefaults } from "../lib/policyDefaults";
-import { CONTRACTS } from "../lib/contracts";
-import { policyRegistryAbi } from "../lib/abis";
-import { publicClient } from "../lib/viem";
-import { shortAddress } from "../lib/format";
+import { readRegisteredPolicy } from "../lib/policyReads";
+import { formatBaseUnits, shortAddress } from "../lib/format";
 
 export default function PoliciesPage() {
   const { policy, wallet, setSlippageBps } = useTrade();
@@ -26,18 +23,9 @@ export default function PoliciesPage() {
       return;
     }
     try {
-      const chainPolicy = await publicClient.readContract({
-        address: CONTRACTS.policyRegistry,
-        abi: policyRegistryAbi,
-        functionName: "getPolicy",
-        args: [inspectId],
-      });
-      const consumed = await publicClient.readContract({
-        address: CONTRACTS.policyRegistry,
-        abi: policyRegistryAbi,
-        functionName: "isConsumed",
-        args: [chainPolicy.trader, chainPolicy.nonce],
-      });
+      const { policy: chainPolicy, consumed } = await readRegisteredPolicy(
+        inspectId,
+      );
       const expired =
         chainPolicy.expiry < BigInt(Math.floor(Date.now() / 1000));
       const status = consumed
@@ -46,7 +34,7 @@ export default function PoliciesPage() {
           ? "expired"
           : "active";
       setInspectText(
-        `Status: ${status}. Trader ${shortAddress(chainPolicy.trader)}. Nonce ${chainPolicy.nonce.toString()}. Minimum output ${formatUnits(chainPolicy.minAmountOut, SWAP_TOKENS.USDC.decimals)} USDC (pool units). Max loss ${chainPolicy.maxLoss.toString()} base units. Max fee ${chainPolicy.maxFee.toString()} base units.`,
+        `Status: ${status}. Trader ${shortAddress(chainPolicy.trader)}. Nonce ${chainPolicy.nonce.toString()}. Minimum output ${formatBaseUnits(chainPolicy.minAmountOut, SWAP_TOKENS.USDC.decimals)} USDC (pool units). Max loss ${chainPolicy.maxLoss.toString()} base units. Max fee ${chainPolicy.maxFee.toString()} base units.`,
       );
     } catch {
       setInspectText("Policy not found or invalid policy ID.");
