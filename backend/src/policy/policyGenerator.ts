@@ -16,7 +16,7 @@ export function generatePolicy(request: PolicyRequest): {
   policy: Policy;
   estimatedLoss: bigint;
   estimatedFee: bigint;
-  riskLevel: "LOW" | "MEDIUM" | "HIGH";
+  riskLevel: "LOW";
 } {
   const risk = calculateRisk({
     amountSpecified: request.amountSpecified,

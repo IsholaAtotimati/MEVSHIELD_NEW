@@ -286,6 +286,23 @@ test("incorrect chain ID is rejected in Sepolia production mode", () => {
   );
 });
 
+test("signer key is optional when signing is disabled", () => {
+  const { env } = makeBaseEnv();
+  const envWithoutSigner: NodeJS.ProcessEnv = { ...env };
+  delete envWithoutSigner.SIGNER_PRIVATE_KEY;
+
+  const config = loadBackendConfig(
+    envWithoutSigner,
+    EXPECTED_AUTHORIZED_SIGNER,
+    FIXTURE_ROUTER_ADDRESS,
+    { requireSigner: false },
+  );
+
+  assert.equal(config.signerWallet, undefined);
+  assert.equal(config.signerAddress, undefined);
+  assert.equal(config.chainId, 11155111);
+});
+
 test("signer mismatch is rejected before signing", () => {
   const { env } = makeBaseEnv();
   const otherWallet = new Wallet("0x2222222222222222222222222222222222222222222222222222222222222222");

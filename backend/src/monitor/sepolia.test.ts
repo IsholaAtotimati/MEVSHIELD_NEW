@@ -60,8 +60,10 @@ function runMonitorScenario(
       const deadline = Date.now() + 2_000;
       while (Date.now() < deadline) {
         const methods = requests.map(({ method }) => method);
+        const snapshot = getStatus?.();
+        const monitorStatus = typeof snapshot === "string" ? snapshot : snapshot?.status;
         if (
-          (process.env.TEST_CHAIN_ID !== "0xaa36a7" && getStatus() === "error") ||
+          (process.env.TEST_CHAIN_ID !== "0xaa36a7" && monitorStatus === "error") ||
           (process.env.TEST_CHAIN_ID === "0xaa36a7" && methods.includes("eth_getLogs"))
         ) break;
         await new Promise((resolve) => setTimeout(resolve, 5));
@@ -70,8 +72,11 @@ function runMonitorScenario(
 
     const methodsBeforeWait = requests.map(({ method }) => method);
     await new Promise((resolve) => setTimeout(resolve, 100));
+    const snapshot = getStatus?.();
     const result = {
-      status: getStatus?.(),
+      status: typeof snapshot === "string" ? snapshot : snapshot?.status,
+      lastCheckedBlock:
+        typeof snapshot === "object" ? snapshot?.lastCheckedBlock : undefined,
       configurationError,
       requests,
       methodsBeforeWait,

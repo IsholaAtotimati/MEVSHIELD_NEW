@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { calculateRisk } from "./riskEngine.js";
 
+export const RISK_MODEL = "deterministic-mvp" as const;
+export const RISK_PREVIEW_DISCLAIMER =
+  "Formula-based estimates only. Not a live market-risk measurement or a prediction of sandwich-attack probability.";
+
 export const RiskPreviewRequestSchema = z.object({
   amountSpecified: z.string().regex(/^-?\d{1,78}$/),
   zeroForOne: z.boolean(),
@@ -13,8 +17,8 @@ export type RiskPreviewResponse = {
   estimatedFee: string;
   maxLoss: string;
   maxFee: string;
-  riskLevel: "LOW" | "MEDIUM" | "HIGH";
-  model: "deterministic-mvp";
+  riskLevel: "LOW";
+  model: typeof RISK_MODEL;
   disclaimer: string;
 };
 
@@ -42,9 +46,8 @@ export function previewRisk(
       maxLoss: result.maxLoss.toString(),
       maxFee: result.maxFee.toString(),
       riskLevel: result.riskLevel,
-      model: "deterministic-mvp",
-      disclaimer:
-        "Formula-based estimates only. Not a live market-risk measurement or a prediction of sandwich-attack probability.",
+      model: RISK_MODEL,
+      disclaimer: RISK_PREVIEW_DISCLAIMER,
     },
   };
 }

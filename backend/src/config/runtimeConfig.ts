@@ -142,11 +142,17 @@ export function isLocalSepoliaDemoEnabled(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+export type LoadBackendConfigOptions = {
+  requireSigner?: boolean;
+};
+
 export function loadBackendConfig(
   env: NodeJS.ProcessEnv = process.env,
   expectedSignerAddress = EXPECTED_AUTHORIZED_SIGNER,
   expectedRouterAddress = EXPECTED_SEPOLIA_ROUTER,
+  options: LoadBackendConfigOptions = {},
 ) {
+  const requireSigner = options.requireSigner ?? true;
   const chainIdValue = Number(firstConfigured(env.CHAIN_ID));
 
   if (Number.isNaN(chainIdValue)) {
@@ -181,24 +187,26 @@ export function loadBackendConfig(
     );
   }
 
-  const signerPrivateKey = env.SIGNER_PRIVATE_KEY?.trim();
-  if (!signerPrivateKey) {
-    throw new Error("SIGNER_PRIVATE_KEY is required for policy signing.");
-  }
+  let signerWallet: Wallet | undefined;
+  if (requireSigner) {
+    const signerPrivateKey = env.SIGNER_PRIVATE_KEY?.trim();
+    if (!signerPrivateKey) {
+      throw new Error("SIGNER_PRIVATE_KEY is required for policy signing.");
+    }
 
-  let signerWallet: Wallet;
-  try {
-    signerWallet = new Wallet(signerPrivateKey);
-  } catch {
-    throw new Error("SIGNER_PRIVATE_KEY is invalid.");
-  }
-  const signerAddress = signerWallet.address.toLowerCase();
-  const expectedSigner = expectedSignerAddress.toLowerCase();
+    try {
+      signerWallet = new Wallet(signerPrivateKey);
+    } catch {
+      throw new Error("SIGNER_PRIVATE_KEY is invalid.");
+    }
+    const signerAddress = signerWallet.address.toLowerCase();
+    const expectedSigner = expectedSignerAddress.toLowerCase();
 
-  if (signerAddress !== expectedSigner) {
-    throw new Error(
-      `Configured SIGNER_PRIVATE_KEY does not match the authorized signer ${expectedSignerAddress}.`,
-    );
+    if (signerAddress !== expectedSigner) {
+      throw new Error(
+        `Configured SIGNER_PRIVATE_KEY does not match the authorized signer ${expectedSignerAddress}.`,
+      );
+    }
   }
 
   const routerAddress = firstConfigured(
@@ -220,7 +228,9 @@ export function loadBackendConfig(
     chainId: chainIdValue,
     verifierAddress: getAddress(verifierAddress),
     signerWallet,
-    signerAddress: getAddress(signerWallet.address),
+    signerAddress: signerWallet
+      ? getAddress(signerWallet.address)
+      : undefined,
     routerAddress: normalizedRouterAddress,
     protectedPool,
   };

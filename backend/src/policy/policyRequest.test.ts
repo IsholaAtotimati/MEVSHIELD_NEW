@@ -4,16 +4,24 @@ import {
   EXPECTED_PROTECTED_POOL,
   assertConfiguredPoolId,
 } from "../config/runtimeConfig.js";
-import { PolicyRequestSchema } from "./policyRequest.js";
+import {
+  MAX_SQRT_PRICE_LIMIT_X96,
+  MIN_SQRT_PRICE_LIMIT_X96,
+  PolicyRequestSchema,
+} from "./policyRequest.js";
+
+function futureExpiry(secondsFromNow = 300): string {
+  return String(Math.floor(Date.now() / 1000) + secondsFromNow);
+}
 
 const validRequest = {
   poolId: EXPECTED_PROTECTED_POOL.poolId,
   trader: "0xE57525678cbf6417F685727b77551316a3De3bba",
   nonce: "1",
-  expiry: "2",
+  expiry: futureExpiry(),
   amountSpecified: "-1000000",
   zeroForOne: true,
-  sqrtPriceLimitX96: "4295128740",
+  sqrtPriceLimitX96: String(MIN_SQRT_PRICE_LIMIT_X96 + 1n),
   minAmountOut: "1",
 };
 
@@ -47,14 +55,73 @@ test("rejects a syntactically valid but unconfigured pool ID before signing", ()
     poolId: `0x${"11".repeat(32)}`,
   });
 
-  test("rejects missing, zero, or malformed minimum output", () => {
-    for (const minAmountOut of [undefined, "0", "-1", "1.5", "not-a-number"]) {
-      const request = { ...validRequest, minAmountOut };
-      assert.equal(PolicyRequestSchema.safeParse(request).success, false);
-    }
-  });
   assert.throws(
     () => assertConfiguredPoolId(parsed.poolId, EXPECTED_PROTECTED_POOL),
     /does not match the configured protected pool/,
+  );
+});
+
+test("rejects missing, zero, or malformed minimum output", () => {
+  for (const minAmountOut of [undefined, "0", "-1", "1.5", "not-a-number"]) {
+    const request = { ...validRequest, minAmountOut };
+    assert.equal(PolicyRequestSchema.safeParse(request).success, false);
+  }
+});
+
+test("rejects zero amountSpecified and malformed numeric strings", () => {
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      amountSpecified: "0",
+    }).success,
+    false,
+  );
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      amountSpecified: "1.5",
+    }).success,
+    false,
+  );
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      nonce: "0",
+    }).success,
+    false,
+  );
+});
+
+test("rejects expired or far-future expiry values", () => {
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      expiry: String(Math.floor(Date.now() / 1000) - 1),
+    }).success,
+    false,
+  );
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      expiry: String(Math.floor(Date.now() / 1000) + 31 * 60),
+    }).success,
+    false,
+  );
+});
+
+test("rejects sqrt price limits outside Uniswap v4 bounds", () => {
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      sqrtPriceLimitX96: String(MIN_SQRT_PRICE_LIMIT_X96),
+    }).success,
+    false,
+  );
+  assert.equal(
+    PolicyRequestSchema.safeParse({
+      ...validRequest,
+      sqrtPriceLimitX96: String(MAX_SQRT_PRICE_LIMIT_X96),
+    }).success,
+    false,
   );
 });

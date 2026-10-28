@@ -37,8 +37,14 @@ export type SepoliaMonitorStatus =
   | "error"
   | "disabled";
 
+export type SepoliaMonitorSnapshot = {
+  status: SepoliaMonitorStatus;
+  lastCheckedBlock?: number;
+};
+
 type MonitorState = {
   status: SepoliaMonitorStatus;
+  lastCheckedBlock?: number;
   timer?: NodeJS.Timeout;
   stop: () => void;
 };
@@ -49,9 +55,14 @@ function firstConfigured(...values: Array<string | undefined>): string | undefin
   return values.find((value) => value?.trim())?.trim();
 }
 
-export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
+export function startSepoliaMonitor(): () => SepoliaMonitorSnapshot {
   if (monitorState) {
-    return () => monitorState?.status ?? "disabled";
+    return () => ({
+      status: monitorState?.status ?? "disabled",
+      ...(monitorState?.lastCheckedBlock !== undefined
+        ? { lastCheckedBlock: monitorState.lastCheckedBlock }
+        : {}),
+    });
   }
 
   const rpcUrl = firstConfigured(
@@ -85,7 +96,7 @@ export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
       status: "disabled",
       stop: () => undefined,
     };
-    return () => monitorState?.status ?? "disabled";
+    return () => ({ status: monitorState?.status ?? "disabled" });
   }
 
   if (!isAddress(registryAddress) || !isAddress(hookAddress)) {
@@ -123,6 +134,13 @@ export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
     status = next;
     if (monitorState) {
       monitorState.status = next;
+    }
+  };
+
+  const recordLastCheckedBlock = (blockNumber: number) => {
+    lastScannedBlock = blockNumber;
+    if (monitorState) {
+      monitorState.lastCheckedBlock = blockNumber;
     }
   };
 
@@ -290,7 +308,7 @@ export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
         for (const log of logs) {
           await processLog(log);
         }
-        lastScannedBlock = latestBlock;
+        recordLastCheckedBlock(latestBlock);
       }
     } catch (error) {
       const wasConnected = status === "connected";
@@ -310,5 +328,10 @@ export function startSepoliaMonitor(): () => SepoliaMonitorStatus {
   monitorState.timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
   monitorState.timer.unref();
 
-  return () => status;
+  return () => ({
+    status,
+    ...(lastScannedBlock !== undefined
+      ? { lastCheckedBlock: lastScannedBlock }
+      : {}),
+  });
 }
