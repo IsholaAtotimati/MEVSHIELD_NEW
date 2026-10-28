@@ -9,5 +9,10 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "**/*.test.ts",
+    "src/signer/testSigner.ts",
+    "src/signer/verifyApiSignature.ts"
+  ]
 }

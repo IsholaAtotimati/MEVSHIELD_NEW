@@ -2,6 +2,7 @@
 cache/
 out/
 node_modules/
+backend/dist/
 
 # Ignores development broadcast logs
 !/broadcast
