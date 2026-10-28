@@ -1,5 +1,11 @@
 import { AbiCoder, Wallet, getAddress, isAddress, keccak256 } from "ethers";
 
+import {
+  firstConfigured,
+  resolveRouterAddress,
+  resolveVerifierAddress,
+} from "./env.js";
+
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const EXPECTED_AUTHORIZED_SIGNER =
   "0x016B78a30CE176EF0B90c122e8677e13aAB2A815";
@@ -130,9 +136,11 @@ export function publicProtectedPoolConfig(
   };
 }
 
-export function firstConfigured(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.trim())?.trim();
-}
+/**
+ * Re-exported so the historic import path keeps working.
+ * @deprecated Import from `./env.js` instead.
+ */
+export { firstConfigured };
 
 export function isLocalSepoliaDemoEnabled(env: NodeJS.ProcessEnv): boolean {
   return (
@@ -169,11 +177,7 @@ export function loadBackendConfig(
 
   const protectedPool = validateProtectedPoolConfig(env, chainIdValue);
 
-  const verifierAddress = firstConfigured(
-    env.POLICY_VERIFIER_ADDRESS,
-    env.VERIFIER_ADDRESS,
-    env.POLICY_VERIFIER,
-  );
+  const verifierAddress = resolveVerifierAddress(env);
 
   if (!verifierAddress || !isAddress(verifierAddress)) {
     throw new Error(
@@ -209,10 +213,7 @@ export function loadBackendConfig(
     }
   }
 
-  const routerAddress = firstConfigured(
-    env.ROUTER_ADDRESS,
-    env.MEVSHIELD_ROUTER,
-  );
+  const routerAddress = resolveRouterAddress(env);
 
   if (!routerAddress || !isAddress(routerAddress)) {
     throw new Error("MEVSHIELD_ROUTER is not configured or is not a valid address.");

@@ -12,8 +12,15 @@ import {
   clearPolicyRequest,
   requestIdForPolicy,
 } from "../observability/requestCorrelation.js";
+import {
+  resolveHookAddress,
+  resolveRegistryAddress,
+  resolveRouterAddress,
+  resolveSepoliaRpcUrl,
+} from "../config/env.js";
+import { SEPOLIA_CHAIN_ID } from "../config/runtimeConfig.js";
 
-const CHAIN_ID = 11155111;
+const CHAIN_ID = SEPOLIA_CHAIN_ID;
 const POLL_INTERVAL_MS = 12_000;
 
 const registryInterface = new Interface([
@@ -51,10 +58,6 @@ type MonitorState = {
 
 let monitorState: MonitorState | undefined;
 
-function firstConfigured(...values: Array<string | undefined>): string | undefined {
-  return values.find((value) => value?.trim())?.trim();
-}
-
 export function startSepoliaMonitor(): () => SepoliaMonitorSnapshot {
   if (monitorState) {
     return () => ({
@@ -65,22 +68,12 @@ export function startSepoliaMonitor(): () => SepoliaMonitorSnapshot {
     });
   }
 
-  const rpcUrl = firstConfigured(
-    process.env.SEPOLIA_RPC_URL,
-    process.env.RPC_URL,
-  );
-  const registryAddress = firstConfigured(
-    process.env.POLICY_REGISTRY_ADDRESS,
-    process.env.POLICY_REGISTRY,
-  );
-  const hookAddress = firstConfigured(
-    process.env.HOOK_ADDRESS,
-    process.env.MEVSHIELD_HOOK_ADDRESS,
-  );
-  const routerAddress = firstConfigured(
-    process.env.ROUTER_ADDRESS,
-    process.env.MEVSHIELD_ROUTER,
-  );
+  const rpcUrl = resolveSepoliaRpcUrl(process.env);
+  const registryAddress = resolveRegistryAddress(process.env);
+  const hookAddress = resolveHookAddress(process.env);
+  // Optional here, unlike loadBackendConfig: the monitor still scans when the
+  // router is unset, and only uses it as a receipt label fallback.
+  const routerAddress = resolveRouterAddress(process.env);
 
   const missing = [
     ["SEPOLIA_RPC_URL or RPC_URL", rpcUrl],
