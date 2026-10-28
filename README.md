@@ -90,7 +90,7 @@ The Solidity contracts integrate with the Uniswap v4 `PoolManager` and use a cus
 
 ### 5. Price-limit validation
 
-The current router implementation validates swap price limits before calling the pool manager. It also enforces a configurable maximum distance between the current tick and the requested price-limit tick.
+The current router implementation validates swap price limits before calling the pool manager. It also caps the distance between the current tick and the requested price-limit tick. That cap is a source constant fixed at 600 ticks in the current router, not a configurable setting, so changing it requires editing source, rebuilding, and redeploying.
 
 ### 6. Minimum-output enforcement
 
@@ -256,14 +256,16 @@ The current router policy structure includes:
 | `trader` | Identifies the trader associated with the policy. |
 | `nonce` | Supports replay protection and policy-use tracking. |
 | `expiry` | Defines when the policy expires. |
-| `maxLoss` | Defines an allowed loss constraint. |
-| `maxFee` | Defines an allowed fee constraint. |
+| `maxLoss` | Caps the loss estimate the hook will accept for this policy. |
+| `maxFee` | Caps the fee estimate the hook will accept for this policy. |
 | `zeroForOne` | Specifies the swap direction. |
 | `amountSpecified` | Binds the policy to the requested swap amount. |
 | `sqrtPriceLimitX96` | Specifies the requested price boundary. |
 | `minAmountOut` | Specifies the minimum acceptable output amount. |
 
 The policy is intended to bind authorization to the actual execution request. A mismatch between the policy and the submitted swap must not be treated as an acceptable authorization.
+
+`maxLoss` and `maxFee` do not bound a measured outcome. The hook compares each signed cap against caller-supplied estimate values taken from `hookData`, so the comparison constrains what the caller asserts, not what the swap actually costs. Realized minimum output and the tick distance cap are router-only checks. This boundary is recorded in [docs/reviews/2026-10-28-code-review.md](docs/reviews/2026-10-28-code-review.md).
 
 The implementation uses structured policy data and EIP-712-related signing and verification components. The precise signature domain, nonce lifecycle, expiry behavior, and authorization rules should be confirmed against the current contract implementations before an integration is considered production-ready.
 
@@ -289,15 +291,13 @@ maxLoss = estimatedLoss * 2
 maxFee  = estimatedFee * 2
 ```
 
-The implementation also uses thresholds to assign a risk category:
+`estimatedLoss` and `estimatedFee` are fixed fractions of the absolute amount. They scale linearly with trade size and never consult pool state, a quote, observed gas, or market data. `maxLoss` and `maxFee` are then simply twice those estimates.
 
-| Category | Current rule |
-|---|---|
-| LOW | `lossBps <= 10` |
-| MEDIUM | `lossBps <= 50`, after the LOW check |
-| HIGH | Above the MEDIUM threshold |
+The risk level is the single literal `LOW` for every non-zero amount, because the fixed 0.1 percent loss model runs identically for every request and cannot produce a higher band. The engine returns `LOW` unconditionally; a zero amount never reaches it through the API, which rejects that request.
 
-These formulas and thresholds are part of the current MVP, not a validated financial model.
+There are no MEDIUM or HIGH bands in the current engine. The model divides by a constant, so it has no input that could raise a category, and no threshold comparison exists in the code. Earlier versions of this document published a three-level table keyed on a basis-point loss figure. The backend no longer computes that figure at all, so the table described a model that does not run.
+
+These formulas are part of the current MVP, not a validated financial model.
 
 **Important limitations:** The current calculation is simplified and is not a complete market-aware estimate of slippage, price impact, swap fees, or MEV exposure. Its output should not be interpreted as a guarantee of realized loss or execution quality. Swap direction is not currently used in the simplified risk calculation.
 
