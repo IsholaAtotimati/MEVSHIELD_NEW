@@ -193,6 +193,7 @@ export function usePolicy(args: UsePolicyArgs) {
       zeroForOne,
       inputAmountBaseUnits,
       inputToken,
+      outputToken,
       protectedQuote,
       quoteIsFresh,
       demoEstimateReady,
