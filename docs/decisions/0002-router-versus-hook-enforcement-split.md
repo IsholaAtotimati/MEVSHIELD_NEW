@@ -44,7 +44,7 @@ What the split costs:
 - The router trusts `hookData` for the policy. It does not verify the signature itself and relies on the hook having already authorized the policy earlier in the same unlock.
 - The router has no notion of the protected pool. It will route any pool key whose hook accepts the supplied data.
 - Loss and fee caps remain unenforced against reality, because the hook has no post-swap visibility and the router is not the place the policy's caps are described as being enforced.
-- Two contracts must agree on the `hookData` layout, and that layout is declared five times across the codebase.
+- Two contracts must agree on the `hookData` layout. After the reuse refactor, the EIP-712 field list is declared once in `backend/src/policy/eip712.ts` and every backend consumer imports it, but the layout itself still appears in four Solidity declarations and once more in the frontend's ABI encoding of `hookData`.
 
 The gap that follows from this decision, stated plainly: on this deployment, a protected swap is protected only if it goes through `MEVShieldRouter`. A direct PoolManager swap is authorized but not bounded on output or price distance.
 

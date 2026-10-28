@@ -15,13 +15,16 @@ Source: [backend/src/server.ts](../../backend/src/server.ts).
 | POST | `/risk-preview` | none | 200 | 400 |
 | POST | `/policy` | none, gated by a 503 feature flag | 200 | 400, 500, 503 |
 | POST | `/observability/transaction` | none | 202 | 400 |
+| any | any other path or method | none | none | 404 |
 
 Every response carries an `x-request-id` header. The value is the caller's `x-request-id` when it matches `^[A-Za-z0-9._:-]{1,128}$`, and a generated UUID otherwise ([backend/src/middleware/requestId.ts:6](../../backend/src/middleware/requestId.ts#L6)).
 
-Two behaviours apply to all routes:
+Four behaviours apply to all routes:
 
-- A malformed JSON body is answered with 400 and `{ "error": "Invalid JSON body" }` before the route handler runs ([backend/src/server.ts:327](../../backend/src/server.ts#L327)).
-- CORS allows one origin, `FRONTEND_URL`, and exposes `x-request-id` ([backend/src/server.ts:85](../../backend/src/server.ts#L85)).
+- A malformed JSON body is answered with 400 and `{ "error": "Invalid JSON body", "code": "invalid_json", "requestId": "..." }` before the route handler runs ([backend/src/server.ts:363](../../backend/src/server.ts#L363)).
+- An unknown path or method is answered with 404 and `code: "not_found"` in the same JSON shape, not Express's default HTML page ([backend/src/server.ts:346](../../backend/src/server.ts#L346)).
+- Every error body carries `error`, `code` and `requestId`. See [Error body shape](#error-body-shape).
+- CORS allows one origin, `FRONTEND_URL`, and exposes `x-request-id` ([backend/src/server.ts:86](../../backend/src/server.ts#L86)).
 
 ---
 
@@ -63,9 +66,9 @@ No parameters, no body.
 
 `status` does not change when the monitor is disabled or erroring, when signing fails, or when the RPC is unreachable. The route always returns 200.
 
-Source: [backend/src/server.ts:104](../../backend/src/server.ts#L104). The snapshot assembly is at [backend/src/monitor/sepolia.ts:331](../../backend/src/monitor/sepolia.ts#L331).
+Source: [backend/src/server.ts:106](../../backend/src/server.ts#L106). The snapshot assembly is at [backend/src/monitor/sepolia.ts:324](../../backend/src/monitor/sepolia.ts#L324).
 
-The frontend validates this body with `parseHealthBody`, which drops an unrecognised `sepoliaMonitor` shape rather than rendering it ([frontend/src/lib/apiValidation.ts:41](../../frontend/src/lib/apiValidation.ts#L41)).
+The frontend validates this body with `parseHealthBody`, which drops an unrecognised `sepoliaMonitor` shape rather than rendering it ([frontend/src/lib/apiValidation.ts:78](../../frontend/src/lib/apiValidation.ts#L78)).
 
 ---
 
@@ -109,7 +112,7 @@ No parameters, no body.
 
 `poolReadiness` is a fixed literal, not a status that another code path might upgrade. A caller that reads it as "the pool is usable" is reading it wrong: initialisation and liquidity are checked by the frontend over RPC.
 
-Source: [backend/src/config/runtimeConfig.ts:114](../../backend/src/config/runtimeConfig.ts#L114).
+Source: [backend/src/config/runtimeConfig.ts:120](../../backend/src/config/runtimeConfig.ts#L120).
 
 The frontend requires every field, including `configurationStatus === "valid"` and `poolReadiness === "not-checked"`, to match before it sets `backendPoolKeyVerified` ([frontend/src/lib/protectedQuote.ts:70](../../frontend/src/lib/protectedQuote.ts#L70)).
 
@@ -165,12 +168,14 @@ All numeric fields are strings to avoid JavaScript precision loss. The values ar
 
 ### Errors
 
-| Status | Body | Cause |
-| --- | --- | --- |
-| 400 | `{ "error": "Invalid risk-preview request", "details": [...] }` | Schema validation failed. `details` is the Zod issue array |
-| 400 | `{ "error": "amountSpecified must not be zero" }` | Zero after parsing |
+| Status | `code` | `error` | Cause |
+| --- | --- | --- | --- |
+| 400 | `invalid_preview` | `Invalid risk-preview request` | Schema validation failed. `details` is the Zod issue array |
+| 400 | `invalid_preview` | `amountSpecified must not be zero` | Zero after parsing |
 
-Source: [backend/src/server.ts:121](../../backend/src/server.ts#L121).
+Both carry `requestId`. See [Error body shape](#error-body-shape).
+
+Source: [backend/src/server.ts:123](../../backend/src/server.ts#L123).
 
 ---
 
@@ -180,7 +185,7 @@ Requests an EIP-712 signature over a fully specified policy.
 
 **This route has no caller authentication.** CORS restricts which browser origins may call it. It does not restrict non-browser clients, and there is no API key, no bearer token, no rate limit and no per-user quota. Any client that can reach the process can obtain a signature from the on-chain authorized signer, subject only to the schema, the pinned pool check, and the pinned trader check.
 
-**It is disabled by default.** Signing requires `MEVSHIELD_V2_POLICY_ENABLED=true` or local demo mode. With signing off, the route returns 503 for every request body, including an invalid one, because the gate is evaluated before validation ([backend/src/server.ts:143](../../backend/src/server.ts#L143)). That ordering is intentional: a disabled endpoint should not leak schema diagnostics. `server.test.ts` covers both an empty body and a fully valid body.
+**It is disabled by default.** Signing requires `MEVSHIELD_V2_POLICY_ENABLED=true` or local demo mode. With signing off, the route returns 503 for every request body, including an invalid one, because the gate is evaluated before validation ([backend/src/server.ts:144](../../backend/src/server.ts#L144)). That ordering is intentional: a disabled endpoint should not leak schema diagnostics. `server.test.ts` covers both an empty body and a fully valid body.
 
 ### Request body
 
@@ -277,23 +282,25 @@ Rules 5 and 6 are the only content checks that tie the request to the deployment
 | `requestId` | string | The request id for this call, also in the response header |
 | `demoMode` | boolean | Whether demo mode was active |
 
-The frontend cross-checks every echoed field against what it sent, and compares `requestId` to the id it generated, before it will submit a registration transaction ([frontend/src/lib/policyMatch.ts:18](../../frontend/src/lib/policyMatch.ts#L18), [frontend/src/hooks/usePolicy.ts:389](../../frontend/src/hooks/usePolicy.ts#L389)).
+The frontend cross-checks every echoed field against what it sent, and compares `requestId` to the id it generated, before it will submit a registration transaction ([frontend/src/lib/policyMatch.ts:18](../../frontend/src/lib/policyMatch.ts#L18), [frontend/src/hooks/usePolicy.ts:365](../../frontend/src/hooks/usePolicy.ts#L365)).
 
 ### Errors
 
-| Status | Body | Cause |
-| --- | --- | --- |
-| 503 | `{ "error": "Policy signing is disabled until the v2 minimum-output contracts are deployed and verified." }` | Feature gate closed |
-| 503 | `{ "error": "Policy signing is enabled but no signer wallet is configured." }` | Gate open, no wallet |
-| 400 | `{ "error": "Invalid demo minimum output", "details": "..." }` | Demo mode with a minimum other than 1 |
-| 400 | `{ "error": "Invalid minimum output", "details": "..." }` | Non-demo with a minimum of exactly 1 |
-| 400 | `{ "error": "Invalid protected pool", "details": "..." }` | `poolId` is not the configured pool |
-| 400 | `{ "error": "Invalid policy trader", "details": "..." }` | `trader` is not the configured router |
-| 400 | `{ "error": "Invalid request", "details": [...] }` | Zod validation failed. `details` is the issue array |
-| 400 | `{ "error": "Invalid JSON body" }` | Body was not parseable JSON |
-| 500 | `{ "error": "Internal error", "requestId": "..." }` | Any other thrown error, including a signing failure |
+| Status | `code` | `error` | Cause |
+| --- | --- | --- | --- |
+| 503 | `policy_signing_disabled` | `Policy signing is disabled until the v2 minimum-output contracts are deployed and verified.` | Feature gate closed, before the body is read |
+| 503 | `signer_unavailable` | `Policy signing is enabled but no signer wallet is configured.` | Gate open, no wallet loaded |
+| 400 | `invalid_minimum_output` | `Invalid demo minimum output` | Demo mode with a minimum other than 1 |
+| 400 | `invalid_minimum_output` | `Invalid minimum output` | Non-demo with a minimum of exactly 1 |
+| 400 | `invalid_pool` | `Invalid protected pool` | `poolId` is not the configured pool |
+| 400 | `invalid_trader` | `Invalid policy trader` | `trader` is not the configured router |
+| 400 | `invalid_request` | `Invalid request` | Zod validation failed. `details` is the issue array |
+| 400 | `invalid_json` | `Invalid JSON body` | Body was not parseable JSON |
+| 500 | `internal_error` | `Internal error` | Any other thrown error, including a signing failure |
 
-The 500 body is a fixed string plus the request id. It deliberately does not include the exception message, so a signing error cannot leak key material or internal paths. Source: [backend/src/server.ts:293](../../backend/src/server.ts#L293).
+Every row carries `requestId`. Only the 500 body omits `details`. See [Error body shape](#error-body-shape).
+
+The 500 body is a fixed message, the `internal_error` code and the request id. It deliberately does not include the exception message, so a signing error cannot leak key material or internal paths. The exception is logged server-side as `policy_request_failed` against the same request id. Source: [backend/src/server.ts:346](../../backend/src/server.ts#L346).
 
 Every failure after the gate is also logged as `policy_request_failed` at error level with the error name and message.
 
@@ -334,7 +341,7 @@ Accepts a client-reported transaction lifecycle event and writes it to the backe
 | `errorName` | string | no | Max 100 characters |
 | `errorMessage` | string | no | Max 300 characters |
 
-Declared at [backend/src/server.ts:88](../../backend/src/server.ts#L88). The schema is a plain `z.object`, so unknown properties are stripped rather than rejected.
+Declared at [backend/src/server.ts:90](../../backend/src/server.ts#L90). The schema is a plain `z.object`, so unknown properties are stripped rather than rejected.
 
 ### Response 202
 
@@ -346,18 +353,20 @@ Declared at [backend/src/server.ts:88](../../backend/src/server.ts#L88). The sch
 
 ### Errors
 
-| Status | Body | Cause |
-| --- | --- | --- |
-| 400 | `{ "error": "Invalid transaction event", "details": [...] }` | Schema validation failed |
-| 400 | `{ "error": "Invalid JSON body" }` | Body was not parseable JSON |
+| Status | `code` | `error` | Cause |
+| --- | --- | --- | --- |
+| 400 | `invalid_request` | `Invalid transaction event` | Schema validation failed |
+| 400 | `invalid_json` | `Invalid JSON body` | Body was not parseable JSON |
+
+Both carry `requestId`. See [Error body shape](#error-body-shape).
 
 ### Trust properties
 
 This route is unauthenticated and unvalidated against reality. Any client can post any `txHash`, any `chainId` and any `errorMessage` within the length limits. The backend logs it as given. A log record from this route is a client claim, not an observation, and should not be treated as evidence that a transaction exists. Real on-chain evidence comes from the monitor, which reads logs and receipts from the RPC.
 
-Log level is `error` when the event name ends in `_failed` and `info` otherwise ([backend/src/server.ts:310](../../backend/src/server.ts#L310)).
+Log level is `error` when the event name ends in `_failed` and `info` otherwise ([backend/src/server.ts:336](../../backend/src/server.ts#L336)).
 
-Source: [backend/src/server.ts:300](../../backend/src/server.ts#L300).
+Source: [backend/src/server.ts:323](../../backend/src/server.ts#L323).
 
 ---
 
@@ -378,10 +387,117 @@ Supply `x-request-id` to correlate a client operation with backend records. The 
 | 200 | Successful read or successful signing |
 | 202 | Accepted telemetry |
 | 400 | Schema or semantic validation failure in the request |
-| 500 | Unexpected server error, body reduced to a fixed string plus request id |
+| 404 | No route matched the method and path |
+| 500 | Unexpected server error during policy signing |
 | 503 | A feature gate or a missing dependency that prevents the operation |
 
-No handler returns 401, 403, 404, 405 or 429. A request to an unknown path, or with a method no route declares, falls through the router and the terminal error middleware to Express's default handler, which returns 404 with an HTML body rather than JSON. Only the routes listed above produce JSON errors.
+No handler returns 401, 403, 405 or 429.
+
+### Error body shape
+
+Every non-2xx response is built by one helper, `sendApiError`, so the shape is identical across all statuses ([backend/src/http/apiError.ts:54](../../backend/src/http/apiError.ts#L54)). Success bodies are untouched by that helper; it shapes failures only.
+
+```json
+{
+  "error": "Invalid protected pool",
+  "code": "invalid_pool",
+  "requestId": "22f762d0-69fd-4c38-8584-7b87bf84b2e3",
+  "details": "The requested pool ID does not match the configured Sepolia WETH/USDC pool."
+}
+```
+
+| Field | Type | Always present | Meaning |
+| --- | --- | --- | --- |
+| `error` | string | yes | Human-readable message. The wording is unchanged from earlier releases, so clients that read `body.error` keep working |
+| `code` | string | yes | Machine-readable reason from a closed union. Safe to switch on |
+| `requestId` | string | yes | The request id for this call. Also returned in the `x-request-id` header |
+| `details` | unknown | no | Omitted entirely when absent. Usually the Zod issue array, or a string hint for a semantic rejection |
+
+`requestId` is present on every error status, including 400, 404, 500 and 503. A client can therefore quote it without first inspecting the status, and the value matches the `x-request-id` response header.
+
+`code` is a closed union declared as `ApiErrorCode` ([backend/src/http/apiError.ts:22](../../backend/src/http/apiError.ts#L22)). The current members:
+
+| `code` | Typical status | Meaning |
+| --- | --- | --- |
+| `invalid_json` | 400 | The request body was not parseable JSON |
+| `invalid_request` | 400 | Schema validation failed, or the telemetry event schema rejected the body |
+| `invalid_preview` | 400 | The risk-preview body failed schema validation, or the amount was zero |
+| `invalid_pool` | 400 | `poolId` is not the configured protected pool |
+| `invalid_trader` | 400 | `trader` is not the configured router |
+| `invalid_minimum_output` | 400 | The minimum-output rule for the active mode was violated |
+| `not_found` | 404 | No route matched the method and path |
+| `policy_signing_disabled` | 503 | The `POST /policy` feature gate is closed |
+| `signer_unavailable` | 503 | Signing is enabled but no signer wallet was loaded |
+| `internal_error` | 500 | An unexpected error was thrown while handling a policy request |
+
+#### 400 Bad request
+
+Returned for a malformed JSON body, a schema failure, or a semantic rejection that the schema cannot express. `details` is usually the Zod issue array ([backend/src/server.ts:339](../../backend/src/server.ts#L339)).
+
+```json
+{
+  "error": "Invalid request",
+  "code": "invalid_request",
+  "requestId": "3f2b9c14-0d1e-4a6b-9f2c-77a1b0c9d8e4",
+  "details": [{ "path": ["trader"], "message": "Invalid", "code": "invalid_format" }]
+}
+```
+
+A malformed body produces `invalid_json` with no `details`, from the error middleware rather than a route ([backend/src/server.ts:363](../../backend/src/server.ts#L363)).
+
+#### 404 Not found
+
+Returned by a terminal handler registered after every route, so an unknown path or an undeclared method answers with the same JSON shape as every other failure instead of Express's default HTML page ([backend/src/server.ts:346](../../backend/src/server.ts#L346)). The message names the attempted method and path.
+
+```json
+{
+  "error": "No route for GET /no-such-route",
+  "code": "not_found",
+  "requestId": "07afc621-c4c3-46ed-8a9c-c2be07f4fe3c"
+}
+```
+
+#### 500 Internal error
+
+Returned when a policy request throws something other than a `ZodError`. The body deliberately carries only a fixed message, the `code`, and the request id, so a signing failure cannot leak key material or internal paths ([backend/src/server.ts:346](../../backend/src/server.ts#L346)). The exception is logged server-side as `policy_request_failed` with the request id, so an operator can join the client report to the log record.
+
+```json
+{
+  "error": "Internal error",
+  "code": "internal_error",
+  "requestId": "b1d4f0a2-5c88-4f31-9e77-2a6c3b5d9e10"
+}
+```
+
+#### 503 Service unavailable
+
+Returned by two distinct gates on `POST /policy`, told apart by `code`.
+
+The feature gate runs before the body is read, so it answers 503 for every body including a malformed one ([backend/src/server.ts:147](../../backend/src/server.ts#L147)):
+
+```json
+{
+  "error": "Policy signing is disabled until the v2 minimum-output contracts are deployed and verified.",
+  "code": "policy_signing_disabled",
+  "requestId": "9c0e5b31-77a2-4d55-8b1f-3e64c2a7f018"
+}
+```
+
+The signer gate runs after validation, when signing is enabled but no wallet loaded ([backend/src/server.ts:186](../../backend/src/server.ts#L186)):
+
+```json
+{
+  "error": "Policy signing is enabled but no signer wallet is configured.",
+  "code": "signer_unavailable",
+  "requestId": "9c0e5b31-77a2-4d55-8b1f-3e64c2a7f018"
+}
+```
+
+Neither 503 body includes `details`.
+
+### Errors are not authenticated
+
+A 404 for an unknown path is served before any route logic, and no error body reveals whether an endpoint would have accepted the request. The backend still applies no caller authentication on any route, so an error response should not be read as evidence that the caller was checked. See [Backend service](../services/backend.md#known-limitations).
 
 ## Related pages
 

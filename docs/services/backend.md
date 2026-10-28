@@ -8,16 +8,18 @@ Source: `backend/src`. Entry point: [backend/src/server.ts](../../backend/src/se
 
 | Module | Files | Responsibility |
 | --- | --- | --- |
-| Configuration | `config/runtimeConfig.ts` | Reads and validates every startup variable, pins the deployment, derives the pool id |
+| Configuration | `config/runtimeConfig.ts`, `config/env.ts` | Validates every startup variable, pins the deployment, derives the pool id. `env.ts` owns the alias precedence for variables that were renamed |
+| HTTP errors | `http/apiError.ts` | Builds every 400, 404, 500 and 503 body from one place so status, `code`, `error` and `requestId` stay in sync |
 | Risk | `risk/riskEngine.ts`, `risk/riskPreview.ts` | The closed-form estimate and the request schema for `/risk-preview` |
-| Policy | `policy/policy.ts`, `policy/policyGenerator.ts`, `policy/policyRequest.ts`, `policy/policySigning.ts` | The policy type, the request schema for `/policy`, policy assembly, and the guarded signing call |
-| Signer | `signer/policySigner.ts` | EIP-712 domain and types, `signTypedData` |
-| Signer diagnostics | `signer/testSigner.ts`, `signer/verifyApiSignature.ts` | Standalone scripts. Excluded from the compiled build |
+| Policy | `policy/policy.ts`, `policy/policyGenerator.ts`, `policy/policyRequest.ts`, `policy/policySigning.ts` | The policy value type, the request schema for `/policy`, policy assembly, and the guarded signing call |
+| EIP-712 | `policy/eip712.ts` | The single off-chain declaration: domain name and version, ordered field list, type string, type hash |
+| Signer | `signer/policySigner.ts` | `signTypedData` over the shared declaration |
+| Signer diagnostics | `backend/scripts/testSigner.ts`, `backend/scripts/verifyApiSignature.ts` | Standalone scripts with their own npm scripts. Outside `src/`, so never compiled |
 | Monitor | `monitor/sepolia.ts` | 12-second poll of registry and hook logs, receipt lookup, correlation |
 | Observability | `observability/logger.ts`, `observability/requestCorrelation.ts` | Structured JSON logging and the policy-id to request-id map |
 | Middleware | `middleware/requestId.ts`, `middleware/httpLifecycle.ts` | Request id assignment and per-request completion logging |
 
-The two script files under `signer/` are excluded from the build by [backend/tsconfig.json](../../backend/tsconfig.json#L12) and are not imported by `server.ts`. `testSigner.ts` and `verifyApiSignature.ts` each carry a hard-coded domain and type list with chain id `31337` and a fixed verifying contract, so they exercise a local Anvil deployment, not Sepolia.
+The two diagnostic scripts now live under `backend/scripts/`, outside the `src` root that `tsc` compiles, so they are excluded from the build by location rather than by an explicit `exclude` entry ([backend/tsconfig.json](../../backend/tsconfig.json#L12)). They import the shared EIP-712 declaration rather than re-declaring the field list, but both still target chain id `31337`, so they exercise a local Anvil deployment rather than Sepolia. They are run through `npm run signer:test` and `npm run signer:verify`.
 
 ## Request pipeline
 
@@ -35,29 +37,31 @@ graph LR
 
 `httpLifecycleMiddleware` logs one `http_request` record per completed response with method, path, status and duration ([backend/src/middleware/httpLifecycle.ts:5](../../backend/src/middleware/httpLifecycle.ts#L5)).
 
-CORS allows exactly one origin, `FRONTEND_URL`, defaulting to `http://localhost:5173`, and exposes `x-request-id` ([backend/src/server.ts:85](../../backend/src/server.ts#L85)).
+CORS allows exactly one origin, `FRONTEND_URL`, defaulting to `http://localhost:5173`, and exposes `x-request-id` ([backend/src/server.ts:86](../../backend/src/server.ts#L86)).
 
-The JSON body limit is the Express default. A malformed JSON body is caught by the final error middleware and answered with 400 and `{ "error": "Invalid JSON body" }` ([backend/src/server.ts:327](../../backend/src/server.ts#L327)).
+The JSON body limit is the Express default. A malformed JSON body is caught by the final error middleware and answered with 400, `code: "invalid_json"`, and the request id ([backend/src/server.ts:363](../../backend/src/server.ts#L363)).
+
+Every failure response is built by `sendApiError` in `http/apiError.ts`, so status, machine-readable `code`, human-readable `error` and `requestId` are produced in one place ([backend/src/http/apiError.ts:54](../../backend/src/http/apiError.ts#L54)). A terminal handler registered after all routes answers an unknown path or undeclared method with 404 and `code: "not_found"` in that same shape, rather than Express's default HTML page ([backend/src/server.ts:346](../../backend/src/server.ts#L346)). Success bodies are not routed through the helper and are unchanged. See [API reference](../api/reference.md#error-body-shape).
 
 ## Startup requirements
 
-`loadAppDependencies` runs before the listener starts and throws on any configuration error, so the process exits rather than serving a misconfigured deployment ([backend/src/server.ts:54](../../backend/src/server.ts#L54)).
+`loadAppDependencies` runs before the listener starts and throws on any configuration error, so the process exits rather than serving a misconfigured deployment ([backend/src/server.ts:55](../../backend/src/server.ts#L55)).
 
 Startup requires, in order:
 
-1. `CHAIN_ID` present and equal to `11155111`. Anything else throws ([backend/src/config/runtimeConfig.ts:73](../../backend/src/config/runtimeConfig.ts#L73)).
-2. The six `PROTECTED_POOL_*` variables present, well formed, in ascending currency order, with a 32-byte `PROTECTED_POOL_ID` ([backend/src/config/runtimeConfig.ts:63](../../backend/src/config/runtimeConfig.ts#L63)).
-3. The pool id recomputed from the pool key, and compared to the configured id. A mismatch throws ([backend/src/config/runtimeConfig.ts:87](../../backend/src/config/runtimeConfig.ts#L87)).
-4. The whole pool key and derived id compared to the pinned Sepolia WETH/USDC pool constants. A mismatch throws ([backend/src/config/runtimeConfig.ts:91](../../backend/src/config/runtimeConfig.ts#L91)).
-5. A verifier address from any of `POLICY_VERIFIER_ADDRESS`, `VERIFIER_ADDRESS`, `POLICY_VERIFIER`, compared to the pinned verifier. A mismatch throws ([backend/src/config/runtimeConfig.ts:172](../../backend/src/config/runtimeConfig.ts#L172)).
-6. A router address from `ROUTER_ADDRESS` or `MEVSHIELD_ROUTER`, compared to the pinned router. A mismatch throws ([backend/src/config/runtimeConfig.ts:212](../../backend/src/config/runtimeConfig.ts#L212)).
-7. `SIGNER_PRIVATE_KEY`, but only when signing is enabled. The derived address must equal the pinned signer ([backend/src/config/runtimeConfig.ts:191](../../backend/src/config/runtimeConfig.ts#L191) to [backend/src/config/runtimeConfig.ts:210](../../backend/src/config/runtimeConfig.ts#L210)).
+1. `CHAIN_ID` present and equal to `11155111`. Anything else throws ([backend/src/config/runtimeConfig.ts:79](../../backend/src/config/runtimeConfig.ts#L79)).
+2. The six `PROTECTED_POOL_*` variables present, well formed, in ascending currency order, with a 32-byte `PROTECTED_POOL_ID` ([backend/src/config/runtimeConfig.ts:69](../../backend/src/config/runtimeConfig.ts#L69)).
+3. The pool id recomputed from the pool key, and compared to the configured id. A mismatch throws ([backend/src/config/runtimeConfig.ts:93](../../backend/src/config/runtimeConfig.ts#L93)).
+4. The whole pool key and derived id compared to the pinned Sepolia WETH/USDC pool constants. A mismatch throws ([backend/src/config/runtimeConfig.ts:97](../../backend/src/config/runtimeConfig.ts#L97)).
+5. A verifier address from any of `POLICY_VERIFIER_ADDRESS`, `VERIFIER_ADDRESS`, `POLICY_VERIFIER`, compared to the pinned verifier. A mismatch throws ([backend/src/config/runtimeConfig.ts:180](../../backend/src/config/runtimeConfig.ts#L180)).
+6. A router address from `ROUTER_ADDRESS` or `MEVSHIELD_ROUTER`, compared to the pinned router. A mismatch throws ([backend/src/config/runtimeConfig.ts:216](../../backend/src/config/runtimeConfig.ts#L216)).
+7. `SIGNER_PRIVATE_KEY`, but only when signing is enabled. The derived address must equal the pinned signer ([backend/src/config/runtimeConfig.ts:195](../../backend/src/config/runtimeConfig.ts#L195) to [backend/src/config/runtimeConfig.ts:210](../../backend/src/config/runtimeConfig.ts#L210)).
 
 `SIGNER_PRIVATE_KEY` being optional when signing is disabled is the reason the process can run in a read-only configuration. Error messages never include the key material, and `runtimeConfig.test.ts` asserts that.
 
-The monitor starts during dependency loading, not on the first request ([backend/src/server.ts:74](../../backend/src/server.ts#L74)). It is started once and memoised, so repeated calls return the same snapshot function ([backend/src/monitor/sepolia.ts:59](../../backend/src/monitor/sepolia.ts#L59)).
+The monitor starts during dependency loading, not on the first request ([backend/src/server.ts:75](../../backend/src/server.ts#L75)). It is started once and memoised, so repeated calls return the same snapshot function ([backend/src/monitor/sepolia.ts:62](../../backend/src/monitor/sepolia.ts#L62)).
 
-The listener binds `0.0.0.0` on `PORT`, defaulting to 4000 ([backend/src/server.ts:337](../../backend/src/server.ts#L337)). `startServer` logs a warning when local demo signing is on, naming the 1-base-unit minimum as not meaningful slippage protection ([backend/src/server.ts:353](../../backend/src/server.ts#L353)).
+The listener binds `0.0.0.0` on `PORT`, defaulting to 4000 ([backend/src/server.ts:372](../../backend/src/server.ts#L372)). `startServer` logs a warning when local demo signing is on, naming the 1-base-unit minimum as not meaningful slippage protection ([backend/src/server.ts:388](../../backend/src/server.ts#L388)).
 
 ## Fail-closed Sepolia pinning
 
@@ -71,7 +75,7 @@ The backend is pinned to one deployment. This is deliberate and it is the main s
 | `EXPECTED_AUTHORIZED_SIGNER` | `0x016B78a30CE176EF0B90c122e8677e13aAB2A815` | The address derived from `SIGNER_PRIVATE_KEY` |
 | `EXPECTED_PROTECTED_POOL` | pool key plus pool id `0x9275…b602` | The six `PROTECTED_POOL_*` variables, both individually and through the derived id |
 
-The constants are declared at [backend/src/config/runtimeConfig.ts:3](../../backend/src/config/runtimeConfig.ts#L3) to [backend/src/config/runtimeConfig.ts:16](../../backend/src/config/runtimeConfig.ts#L16).
+The constants are declared at [backend/src/config/runtimeConfig.ts:9](../../backend/src/config/runtimeConfig.ts#L9) to [backend/src/config/runtimeConfig.ts:22](../../backend/src/config/runtimeConfig.ts#L22).
 
 Consequences a reader should internalise:
 
@@ -79,20 +83,20 @@ Consequences a reader should internalise:
 - A stale environment file is a startup failure, not a degraded mode. That is the intent.
 - The pinned values must be edited in code, reviewed, and redeployed when the contracts are redeployed. A configuration file alone cannot retarget the service.
 
-The pool configuration is exposed to clients through `GET /config/protected-pool`, which reports `configurationStatus: "valid"` and `poolReadiness: "not-checked"` ([backend/src/config/runtimeConfig.ts:114](../../backend/src/config/runtimeConfig.ts#L114)). The `not-checked` value is not a placeholder for an unimplemented check that would return `ready`: the backend has no pool-state read path at all. Pool readiness is assessed by the frontend from RPC reads. `runtimeConfig.test.ts` has a test asserting the response does not claim the pool is initialised or liquid.
+The pool configuration is exposed to clients through `GET /config/protected-pool`, which reports `configurationStatus: "valid"` and `poolReadiness: "not-checked"` ([backend/src/config/runtimeConfig.ts:120](../../backend/src/config/runtimeConfig.ts#L120)). The `not-checked` value is not a placeholder for an unimplemented check that would return `ready`: the backend has no pool-state read path at all. Pool readiness is assessed by the frontend from RPC reads. `runtimeConfig.test.ts` has a test asserting the response does not claim the pool is initialised or liquid.
 
 ## Policy signing gate
 
-Signing is enabled by `resolvePolicySigningEnabled`, which returns true when `MEVSHIELD_V2_POLICY_ENABLED` is exactly `"true"`, or when local demo mode is on ([backend/src/server.ts:47](../../backend/src/server.ts#L47)).
+Signing is enabled by `resolvePolicySigningEnabled`, which returns true when `MEVSHIELD_V2_POLICY_ENABLED` is exactly `"true"`, or when local demo mode is on ([backend/src/server.ts:48](../../backend/src/server.ts#L48)).
 
-Local demo mode requires `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true`, `NODE_ENV` not equal to `production`, and `RAILWAY_ENVIRONMENT_NAME` unset ([backend/src/config/runtimeConfig.ts:137](../../backend/src/config/runtimeConfig.ts#L137)). Demo mode therefore cannot be enabled on Railway or in a production build by setting the flag alone.
+Local demo mode requires `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true`, `NODE_ENV` not equal to `production`, and `RAILWAY_ENVIRONMENT_NAME` unset ([backend/src/config/runtimeConfig.ts:145](../../backend/src/config/runtimeConfig.ts#L145)). Demo mode therefore cannot be enabled on Railway or in a production build by setting the flag alone.
 
-When signing is disabled, `POST /policy` answers 503 before reading the body, so a disabled endpoint returns 503 for every body including an invalid one ([backend/src/server.ts:140](../../backend/src/server.ts#L140)). This ordering is deliberate and is covered by two tests in `server.test.ts`, one with an empty body and one with a valid body.
+When signing is disabled, `POST /policy` answers 503 before reading the body, so a disabled endpoint returns 503 for every body including an invalid one ([backend/src/server.ts:144](../../backend/src/server.ts#L144)). This ordering is deliberate and is covered by two tests in `server.test.ts`, one with an empty body and one with a valid body.
 
 When signing is enabled, the route performs these steps in order:
 
 1. Parse the body with `PolicyRequestSchema`.
-2. In demo mode, require `minAmountOut` to be exactly `"1"`; outside demo mode, reject `minAmountOut` of `"1"` ([backend/src/server.ts:154](../../backend/src/server.ts#L154), [backend/src/server.ts:162](../../backend/src/server.ts#L162)).
+2. In demo mode, require `minAmountOut` to be exactly `"1"`; outside demo mode, reject `minAmountOut` of `"1"` ([backend/src/server.ts:160](../../backend/src/server.ts#L160), [backend/src/server.ts:173](../../backend/src/server.ts#L173)).
 3. Require a signer wallet, else 503.
 4. Require the requested pool id to equal the configured protected pool id, else 400.
 5. Require the requested trader to equal the configured router, else 400.
@@ -103,7 +107,7 @@ When signing is enabled, the route performs these steps in order:
 10. Derive `policyId` and record the request id correlation.
 11. Respond with the policy, the signature, `policyId`, `requestId` and `demoMode`.
 
-Any thrown error after step 1 is logged as `policy_request_failed` and answered with 500 plus `{ "error": "Internal error", "requestId": … }` ([backend/src/server.ts:280](../../backend/src/server.ts#L280)). A Zod error is answered with 400 instead.
+Any thrown error after step 1 is logged as `policy_request_failed` and answered with 500 plus `{ "error": "Internal error", "requestId": … }` ([backend/src/server.ts:306](../../backend/src/server.ts#L306)). A Zod error is answered with 400 instead.
 
 ## Risk model
 
@@ -118,13 +122,15 @@ maxFee        = estimatedFee * 2
 riskLevel     = "LOW"
 ```
 
-`zeroForOne` is accepted in the input type and is not used by the calculation. The result type narrows `riskLevel` to the literal `"LOW"`, so `MEDIUM` and `HIGH` cannot be produced. The frontend validator still accepts all three strings ([frontend/src/lib/apiValidation.ts:62](../../frontend/src/lib/apiValidation.ts#L62)), because it validates a wire format rather than the current model.
+`zeroForOne` is accepted in the input type and is not used by the calculation. The result type narrows `riskLevel` to the literal `"LOW"`, so `MEDIUM` and `HIGH` cannot be produced. The frontend validator still accepts all three strings ([frontend/src/lib/apiValidation.ts:99](../../frontend/src/lib/apiValidation.ts#L99)), because it validates a wire format rather than the current model.
 
 The same function feeds two paths: `/risk-preview`, which returns the estimate directly, and `/policy`, which writes `maxLoss` and `maxFee` into the signed policy. So the signed caps are always exactly twice a fixed fraction of the trade size. That is a modelling limitation rather than an enforcement bug, and the disclaimer field says so in the response body.
 
 ## Signing
 
-`signPolicy` builds the ethers domain `{ name: "MEVShield", version: "1", chainId, verifyingContract }` and the ten-field `Policy` type list, then calls `wallet.signTypedData` ([backend/src/signer/policySigner.ts:29](../../backend/src/signer/policySigner.ts#L29)). The field list matches `PolicyVerifier.POLICY_TYPEHASH` exactly, and `policySigning.test.ts` has a test asserting that `minAmountOut` is part of the signed digest.
+`signPolicy` calls `wallet.signTypedData` with the domain and the field list from the shared EIP-712 module ([backend/src/signer/policySigner.ts:17](../../backend/src/signer/policySigner.ts#L17)). `policyDomain` fixes the name `MEVShield`, the version `1`, and passes through the chain id and verifying contract; `POLICY_TYPES` is the ordered ten-field list ([backend/src/policy/eip712.ts:28](../../backend/src/policy/eip712.ts#L28), [backend/src/policy/eip712.ts:49](../../backend/src/policy/eip712.ts#L49)).
+
+That declaration is the only one in the backend. `policy/eip712.test.ts` parses the `POLICY_TYPEHASH` string literal out of `src/PolicyVerifier.sol` and asserts the derived type string and hash match it, and pins the hash to a literal, so the off-chain type cannot drift from the on-chain one silently ([backend/src/policy/eip712.test.ts:26](../../backend/src/policy/eip712.test.ts#L26), [backend/src/policy/eip712.test.ts:53](../../backend/src/policy/eip712.test.ts#L53)). `policySigning.test.ts` separately asserts that `minAmountOut` is part of the signed digest.
 
 `signProtectedPolicy` wraps the signer with a pool-id assertion, so even a caller that bypasses the route cannot obtain a signature for a foreign pool ([backend/src/policy/policySigning.ts:24](../../backend/src/policy/policySigning.ts#L24)).
 
@@ -142,7 +148,7 @@ These are behaviours of the current code that a reader should not have to discov
 
 - No caller authentication on any route. CORS restricts browsers to one origin; it does not restrict non-browser clients. When signing is enabled, any client that can reach the process can obtain a signature from the authorized on-chain signer for any `minAmountOut`, subject only to the schema and the pinned pool and trader. There is no rate limit.
 - No request-size or numeric bound beyond the schema. `amountSpecified` and `expiry` are bounded by regex and by the 30-minute expiry window; `poolId` and `trader` are regex-checked hex.
-- The frontend's expiry is one hour, the backend's ceiling is 30 minutes. A UI request is rejected with 400 unless the frontend expiry is reduced. See [data model](../architecture/data-model.md#nonce-lifecycle).
+- The frontend requests a 10-minute lifetime through `buildPolicyExpiry`, which stays inside the backend's 30-minute ceiling ([frontend/src/config/policy.ts:23](../../frontend/src/config/policy.ts#L23), [backend/src/policy/policyRequest.ts:6](../../backend/src/policy/policyRequest.ts#L6)). The ceiling is short on purpose: it bounds the replay window for a signed policy. The frontend mirrors the ceiling as a local constant rather than importing it, so the two values could drift in principle; `frontend/src/config/policy.test.mjs` fails when the requested TTL reaches or exceeds the mirrored ceiling. See [data model](../architecture/data-model.md#nonce-lifecycle).
 - `generatePolicy` has no direct unit test. It is exercised only through the route tests, and only up to the point where a signer would be required.
 - The risk model ignores direction, pool state and amount of liquidity.
 - The monitor is fail-open for policy correlation. If the monitor is disabled or erroring, the swap still happens; only the correlation log is missing. See [monitoring](monitoring.md).

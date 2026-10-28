@@ -51,11 +51,40 @@ Three signed fields are absent: `zeroForOne`, `amountSpecified`, `sqrtPriceLimit
 
 ### 5. The off-chain mirror
 
-`backend/src/policy/policy.ts` declares the same ten fields as bigints, booleans and strings ([backend/src/policy/policy.ts:1](../../backend/src/policy/policy.ts#L1)). The EIP-712 field list is then written out again, by hand, in `backend/src/signer/policySigner.ts` ([backend/src/signer/policySigner.ts:9](../../backend/src/signer/policySigner.ts#L9)), in `backend/src/signer/testSigner.ts`, and in `backend/src/signer/verifyApiSignature.ts`. `getPolicyTypes()` exists in `policySigner.ts` but the other two do not import it. The frontend repeats the tuple a fifth time when it ABI-encodes `hookData` ([frontend/src/hooks/useExecution.ts:196](../../frontend/src/hooks/useExecution.ts#L196)).
+`backend/src/policy/policy.ts` declares the same ten fields as bigints, booleans and strings ([backend/src/policy/policy.ts:1](../../backend/src/policy/policy.ts#L1)). That is the TypeScript value type, not the signing type.
+
+The EIP-712 field list itself is declared exactly once, in `backend/src/policy/eip712.ts`. That module owns the domain name and version, the ordered `Policy` field list, the type string derived from it, and the resulting type hash ([backend/src/policy/eip712.ts:28](../../backend/src/policy/eip712.ts#L28), [backend/src/policy/eip712.ts:61](../../backend/src/policy/eip712.ts#L61), [backend/src/policy/eip712.ts:66](../../backend/src/policy/eip712.ts#L66)).
+
+Every backend consumer imports from it rather than re-declaring the fields:
+
+| Consumer | Uses |
+| --- | --- |
+| `backend/src/signer/policySigner.ts` | `policyDomain` and `POLICY_TYPES` ([backend/src/signer/policySigner.ts:17](../../backend/src/signer/policySigner.ts#L17)) |
+| `backend/scripts/testSigner.ts` | `policyDomain`, `POLICY_TYPES`, `POLICY_TYPEHASH` |
+| `backend/scripts/verifyApiSignature.ts` | `policyDomain`, `POLICY_TYPES` |
+| `backend/src/policy/policySigning.test.ts` | `policyDomain`, `POLICY_TYPES` to verify a signature |
+
+`getPolicyTypes()` remains exported from `policySigner.ts` for compatibility but is now deprecated in favour of importing `POLICY_TYPES` directly ([backend/src/signer/policySigner.ts:35](../../backend/src/signer/policySigner.ts#L35)).
+
+### How drift is prevented
+
+Consolidating the off-chain declaration removes duplication between backend modules. It does not, on its own, stop the backend from drifting from Solidity. That is handled by a dedicated test, `backend/src/policy/eip712.test.ts`, which reads `src/PolicyVerifier.sol` as text and parses the `POLICY_TYPEHASH` string literal out of it ([backend/src/policy/eip712.test.ts:26](../../backend/src/policy/eip712.test.ts#L26)). It then asserts three things:
+
+1. The type string derived from the TypeScript field list equals the literal in the Solidity source.
+2. `keccak256` of that type string equals the exported `POLICY_TYPEHASH`.
+3. The type hash equals a value pinned in the test itself ([backend/src/policy/eip712.test.ts:53](../../backend/src/policy/eip712.test.ts#L53)).
+
+It also asserts the field order and types match the Solidity struct order, and that the domain name and version match the `EIP712("MEVShield", "1")` constructor call ([backend/src/policy/eip712.test.ts:79](../../backend/src/policy/eip712.test.ts#L79)). Because the third check pins a literal, a change to both the parser and the field list cannot mask a real change silently.
+
+The frontend still declares the tuple a further time when it ABI-encodes `hookData` ([frontend/src/hooks/useExecution.ts:196](../../frontend/src/hooks/useExecution.ts#L196)). That declaration is the wire encoding of the struct, not the signing type, and it is not tied to `POLICY_TYPEHASH` by any test. A field added to the Solidity struct would need this tuple updated by hand.
 
 ## Field drift
 
-The drift is not cosmetic. Three consequences follow from storing seven of ten fields.
+Two different kinds of drift are worth separating.
+
+The first is drift between the off-chain and on-chain declarations of the same signed type. That is now closed for the backend: one module owns the field list, and a test parses the Solidity type hash to prove they agree. See [How drift is prevented](#how-drift-is-prevented).
+
+The second is drift between what is signed and what is stored. The registry keeps seven of the ten signed fields, and that is not cosmetic. Three consequences follow.
 
 ### Consequence 1: the registry cannot prove what was authorized
 
@@ -86,8 +115,8 @@ Three derivations must agree, and they do:
 | --- | --- |
 | Registry, on registration | [src/PolicyRegistry.sol:121](../../src/PolicyRegistry.sol#L121) |
 | Authorization, on authorize | [src/PolicyAuthorization.sol:66](../../src/PolicyAuthorization.sol#L66) |
-| Backend, for correlation | [backend/src/server.ts:250](../../backend/src/server.ts#L250) |
-| Monitor, for the hook event | [backend/src/monitor/sepolia.ts:173](../../backend/src/monitor/sepolia.ts#L173) |
+| Backend, for correlation | [backend/src/server.ts:276](../../backend/src/server.ts#L276) |
+| Monitor, for the hook event | [backend/src/monitor/sepolia.ts:166](../../backend/src/monitor/sepolia.ts#L166) |
 
 Properties of this derivation:
 
@@ -126,7 +155,7 @@ Properties worth stating plainly:
 - The nonce is per trader, not global. `test/PolicyRegistry.t.sol` has a test confirming two traders can use the same nonce value.
 - The registry enforces only that the nonce has not been used. It does not enforce monotonicity or a window, so a trader may use any nonce value that has not been used before.
 
-The frontend generates the nonce as `Date.now().toString()`, a millisecond timestamp ([frontend/src/hooks/usePolicy.ts:323](../../frontend/src/hooks/usePolicy.ts#L323)). The policy expiry is set to `floor(now / 1000) + 3600` ([frontend/src/hooks/usePolicy.ts:322](../../frontend/src/hooks/usePolicy.ts#L322)). The backend rejects any expiry more than 30 minutes in the future ([backend/src/policy/policyRequest.ts:64](../../backend/src/policy/policyRequest.ts#L64)), so a policy requested through the UI is rejected by the backend and must be retried with a shorter expiry. This is a live inconsistency between the two layers, not a documentation simplification.
+The frontend generates the nonce as `Date.now().toString()`, a millisecond timestamp ([frontend/src/hooks/usePolicy.ts:306](../../frontend/src/hooks/usePolicy.ts#L306)). The expiry comes from `buildPolicyExpiry`, a pure function that adds `POLICY_TTL_SECONDS` to the supplied clock reading ([frontend/src/config/policy.ts:32](../../frontend/src/config/policy.ts#L32)); the TTL is 10 minutes ([frontend/src/config/policy.ts:23](../../frontend/src/config/policy.ts#L23)). The backend rejects any expiry more than 30 minutes in the future ([backend/src/policy/policyRequest.ts:64](../../backend/src/policy/policyRequest.ts#L64)) and remains the source of truth for that ceiling. The frontend mirrors the ceiling as `POLICY_MAX_TTL_SECONDS` ([frontend/src/config/policy.ts:10](../../frontend/src/config/policy.ts#L10)) purely so it can assert its own requests stay inside it; raising the mirror changes nothing on the server. A UI request is therefore accepted by the expiry check, and the requested lifetime is deliberately shorter than the ceiling because a policy can be replayed until it expires.
 
 ## The ERC-20 settlement path
 
@@ -167,7 +196,7 @@ The output leg chosen by `_enforceMinimumOutput` depends on direction: `delta.am
 
 ### Approval
 
-The router pulls the input token with `transferFrom`, so the user must approve the router first. The frontend asks for an allowance check, and if the allowance is short it approves exactly the swap amount ([frontend/src/hooks/useExecution.ts:167](../../frontend/src/hooks/useExecution.ts#L167) to [frontend/src/hooks/useExecution.ts#L193](../../frontend/src/hooks/useExecution.ts#L193)). The portfolio page offers the same exact-amount approve plus a revoke-to-zero control ([frontend/src/pages/PortfolioPage.tsx:147](../../frontend/src/pages/PortfolioPage.tsx#L147), [frontend/src/pages/PortfolioPage.tsx:173](../../frontend/src/pages/PortfolioPage.tsx#L173)).
+The router pulls the input token with `transferFrom`, so the user must approve the router first. The frontend asks for an allowance check, and if the allowance is short it approves exactly the swap amount ([frontend/src/hooks/useExecution.ts:167](../../frontend/src/hooks/useExecution.ts#L167) to [frontend/src/hooks/useExecution.ts#L193](../../frontend/src/hooks/useExecution.ts#L193)). The portfolio page offers the same exact-amount approve plus a revoke-to-zero control ([frontend/src/pages/PortfolioPage.tsx:150](../../frontend/src/pages/PortfolioPage.tsx#L150), [frontend/src/pages/PortfolioPage.tsx:174](../../frontend/src/pages/PortfolioPage.tsx#L174)).
 
 ### Native value
 
@@ -186,7 +215,7 @@ The frontend keeps two local, unversioned stores.
 | `mevshield-activity-v1` | Up to 200 `ActivityRow` records | [frontend/src/lib/activityStorage.ts:16](../../frontend/src/lib/activityStorage.ts#L16) |
 | `mevshield-policy-defaults` | `slippageBps`, `maxLoss`, `maxFee` | [frontend/src/lib/policyDefaults.ts:1](../../frontend/src/lib/policyDefaults.ts#L1) |
 
-Both are read through `try`/`catch` and fall back to a default or empty value on parse failure. Neither is authoritative; they hold display history and UI preferences. The saved `maxLoss` and `maxFee` defaults are labelled as stored locally and are not sent to the backend, since the backend computes both from its own risk model ([frontend/src/pages/PoliciesPage.tsx:118](../../frontend/src/pages/PoliciesPage.tsx#L118)).
+Both are read through `try`/`catch` and fall back to a default or empty value on parse failure. Neither is authoritative; they hold display history and UI preferences. The saved `maxLoss` and `maxFee` defaults are labelled as stored locally and are not sent to the backend, since the backend computes both from its own risk model ([frontend/src/pages/PoliciesPage.tsx:107](../../frontend/src/pages/PoliciesPage.tsx#L107)).
 
 ## Related pages
 
