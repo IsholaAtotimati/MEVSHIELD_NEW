@@ -217,4 +217,56 @@ export const mevShieldHookAbi = [
       { name: "", type: "address" },
     ],
   },
+  {
+    type: "event",
+    name: "SwapPolicyEnforced",
+    inputs: [
+      { name: "poolId", type: "bytes32", indexed: true },
+      { name: "trader", type: "address", indexed: true },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "maxLoss", type: "uint256", indexed: false },
+      { name: "maxFee", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+export const policyRegistryEventsAbi = [
+  {
+    type: "event",
+    name: "PolicyRegistered",
+    inputs: [
+      { name: "policyId", type: "bytes32", indexed: true },
+      { name: "poolId", type: "bytes32", indexed: true },
+      { name: "trader", type: "address", indexed: true },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "expiry", type: "uint256", indexed: false },
+      { name: "maxLoss", type: "uint256", indexed: false },
+      { name: "maxFee", type: "uint256", indexed: false },
+      { name: "minAmountOut", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+export const weth9Abi = [
+  {
+    type: "function",
+    name: "deposit",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "wad", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
 ] as const;
