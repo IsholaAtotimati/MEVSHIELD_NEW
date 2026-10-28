@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1.7
+#
+# MEVShield contracts toolchain image. Build context is the repository root,
+# because forge needs src/, script/, test/, foundry.toml and lib/ together.
+#
+# Base: the official Foundry image, pinned by version tag AND digest. The
+# floating `stable` tag would silently change the toolchain between builds.
+#
+# Submodules: lib/ holds git submodules (forge-std, openzeppelin-contracts,
+# v4-core) and v4-core has its own nested submodules (solmate in particular is
+# imported by script/SetupBackendSwap.s.sol). There are two supported ways to
+# populate them, chosen by SUBMODULE_MODE:
+#
+#   copy    (default) The build context already has lib/ populated on the host,
+#           either because the repo was cloned with --recursive or because
+#           script/docker-local-up.sh ran `git submodule update --init
+#           --recursive`. This works offline and pins exactly the commits the
+#           host has checked out.
+#
+#   fetch   The image clones the submodules itself during the build. Use this on
+#           a fresh clone without submodules. It needs network access at build
+#           time and resolves the commits recorded in the repo's gitlinks.
+#
+# The compose file uses `copy`, so `docker compose build` does not depend on
+# network access to GitHub beyond the base image.
+
+ARG FOUNDRY_IMAGE=ghcr.io/foundry-rs/foundry:v1.5.1@sha256:3a70bfa9bd2c732a767bb60d12c8770b40e8f9b6cca28efc4b12b1be81c7f28e
+
+FROM ${FOUNDRY_IMAGE} AS contracts
+
+# The image runs as uid 1000 `foundry`, so nothing may need root.
+USER root
+
+# git and jq are needed by the deploy script: git to fetch submodules in
+# `fetch` mode, jq to extract addresses from the Forge broadcast artifact.
+RUN apt-get update \
+ && apt-get install --no-install-recommends --yes git jq ca-certificates curl \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+ARG SUBMODULE_MODE=copy
+
+# Everything forge needs. .dockerignore excludes out/, cache/, broadcast/,
+# node_modules and .env files so no local state or secret enters the image.
+COPY foundry.toml ./
+COPY src ./src
+COPY script ./script
+COPY test ./test
+
+# lib/ is copied as-is. In `copy` mode it is already populated. In `fetch` mode
+# the host copy is skipped (empty in a fresh clone) and the build clones it.
+COPY lib ./lib
+COPY .gitmodules ./
+
+RUN if [ "$SUBMODULE_MODE" = "fetch" ]; then \
+      git submodule update --init --recursive --depth 1; \
+    fi
+
+# Fail here if the libraries are missing, rather than failing later inside a
+# deploy with a confusing import error.
+RUN test -d lib/forge-std/src && \
+    test -d lib/v4-core/src && \
+    test -d lib/openzeppelin-contracts/contracts && \
+    test -d lib/v4-core/lib/solmate/src
+
+# Compile once at build time. This surfaces a compile error during `docker
+# build` instead of inside the one-shot deploy service, and it fails the build
+# early if the pinned solc (0.8.26) cannot be fetched.
+#
+# The image has no solc preinstalled and no curl/wget by default, so this also
+# verifies that forge can download the pinned compiler with the base image's
+# own tooling.
+RUN forge build --sizes
+
+# The deploy entrypoint lives on the host at script/docker-deploy-local.sh and is
+# mounted by compose, so the image itself stays a plain toolchain.
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["forge --version"]
