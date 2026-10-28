@@ -1,4 +1,6 @@
 import { formatUnits } from "viem";
+
+import { formatTokenAmount } from "../lib/format";
 import type { ProtectedQuote } from "../lib/protectedQuote";
 import SwapDirectionButton from "./SwapDirectionButton";
 
@@ -15,6 +17,11 @@ type SwapInputsProps = {
   inputToken: SwapTokenSymbol;
   outputToken: SwapTokenSymbol;
   inputAmount: string;
+  /**
+   * ERC-20 balance of the selected pay token. For ETH this is the WETH balance,
+   * because WETH is what the pool and router actually move.
+   */
+  inputBalance: bigint | null;
   swapTokens: Record<SwapTokenSymbol, SwapTokenConfig>;
   demoMode: boolean;
   demoEstimateBaseUnits: bigint | null;
@@ -31,6 +38,7 @@ export default function SwapInputs({
   inputToken,
   outputToken,
   inputAmount,
+  inputBalance,
   swapTokens,
   demoMode,
   demoEstimateBaseUnits,
@@ -42,64 +50,109 @@ export default function SwapInputs({
   onOutputTokenChange,
   onSwitchDirection,
 }: SwapInputsProps) {
+  const payToken = swapTokens[inputToken];
+  const receiveToken = swapTokens[outputToken];
+  const canUseMax = inputBalance !== null && inputBalance > 0n;
+
   return (
     <div className="swap-inputs">
-      <label>
-        You pay · {swapTokens[inputToken].displayName}
+      <div className="swap-field">
+        <label htmlFor="swap-pay-amount">
+          You pay · {payToken.displayName}
+        </label>
         <div className="swap-input-row">
           <input
+            id="swap-pay-amount"
             type="text"
             inputMode="decimal"
             autoComplete="off"
-            placeholder={`Amount in ${swapTokens[inputToken].poolSymbol}`}
+            placeholder={`Amount in ${payToken.poolSymbol}`}
             value={inputAmount}
             onChange={(event) => onInputAmountChange(event.target.value)}
-            aria-label={`Amount to pay in ${swapTokens[inputToken].poolSymbol}`}
+            aria-label={`Amount to pay in ${payToken.poolSymbol}`}
+            aria-describedby="swap-pay-balance"
           />
           <select
             value={inputToken}
-            onChange={(event) => onInputTokenChange(event.target.value as SwapTokenSymbol)}
+            onChange={(event) =>
+              onInputTokenChange(event.target.value as SwapTokenSymbol)
+            }
             aria-label="Token to pay"
           >
-            <option value="ETH" disabled={outputToken === "ETH"}>ETH (Sepolia)</option>
-            <option value="USDC" disabled={outputToken === "USDC"}>USDC (Sepolia)</option>
+            <option value="ETH" disabled={outputToken === "ETH"}>
+              ETH (Sepolia)
+            </option>
+            <option value="USDC" disabled={outputToken === "USDC"}>
+              USDC (Sepolia)
+            </option>
           </select>
         </div>
-      </label>
+        <div className="swap-balance-row">
+          <span id="swap-pay-balance">
+            Balance: {formatTokenAmount(inputBalance, payToken.decimals)}{" "}
+            {payToken.poolSymbol}
+          </span>
+          <button
+            type="button"
+            className="chip"
+            disabled={!canUseMax}
+            aria-label={`Use full ${payToken.poolSymbol} balance`}
+            onClick={() =>
+              onInputAmountChange(
+                formatUnits(inputBalance ?? 0n, payToken.decimals),
+              )
+            }
+          >
+            Max
+          </button>
+        </div>
+      </div>
       <SwapDirectionButton
         routeDirection={routeDirection}
         onSwitchDirection={onSwitchDirection}
       />
-      <label>
-        You receive · {swapTokens[outputToken].displayName}
+      <div className="swap-field">
+        <label htmlFor="swap-receive-amount">
+          You receive · {receiveToken.displayName}
+        </label>
         <div className="swap-input-row">
           <input
+            id="swap-receive-amount"
             readOnly
             type="text"
             value={
               demoMode && demoEstimateBaseUnits !== null
-                ? formatUnits(demoEstimateBaseUnits, swapTokens[outputToken].decimals)
+                ? formatUnits(demoEstimateBaseUnits, receiveToken.decimals)
                 : quoteIsFresh && protectedQuote.status === "available"
-                ? formatUnits(protectedQuote.amountOutBaseUnits, swapTokens[outputToken].decimals)
-                : ""
+                  ? formatUnits(
+                      protectedQuote.amountOutBaseUnits,
+                      receiveToken.decimals,
+                    )
+                  : ""
             }
             placeholder={
               demoMode
-                ? `Demo estimate unavailable (${swapTokens[outputToken].poolSymbol})`
-                : `Quote unavailable (${swapTokens[outputToken].poolSymbol})`
+                ? `Demo estimate unavailable (${receiveToken.poolSymbol})`
+                : `Quote unavailable (${receiveToken.poolSymbol})`
             }
-            aria-label={`${demoMode ? "Demo estimated" : "Quoted"} output amount in ${swapTokens[outputToken].poolSymbol}`}
+            aria-label={`${demoMode ? "Demo estimated" : "Quoted"} output amount in ${receiveToken.poolSymbol}`}
           />
           <select
             value={outputToken}
-            onChange={(event) => onOutputTokenChange(event.target.value as SwapTokenSymbol)}
+            onChange={(event) =>
+              onOutputTokenChange(event.target.value as SwapTokenSymbol)
+            }
             aria-label="Token to receive"
           >
-            <option value="ETH" disabled={inputToken === "ETH"}>ETH (Sepolia)</option>
-            <option value="USDC" disabled={inputToken === "USDC"}>USDC (Sepolia)</option>
+            <option value="ETH" disabled={inputToken === "ETH"}>
+              ETH (Sepolia)
+            </option>
+            <option value="USDC" disabled={inputToken === "USDC"}>
+              USDC (Sepolia)
+            </option>
           </select>
         </div>
-      </label>
+      </div>
     </div>
   );
 }

@@ -12,6 +12,7 @@ type ContractRow = {
 export default function NetworkPage() {
   const { protocol, backend } = useTrade();
   const { deployment } = protocol;
+  const monitor = backend.health?.sepoliaMonitor;
 
   const rows: ContractRow[] = [
     {
@@ -94,7 +95,15 @@ export default function NetworkPage() {
           </div>
           <div className="row">
             <span>Monitor</span>
-            <strong>{backend.health?.sepoliaMonitor ?? "unknown"}</strong>
+            <strong>{monitor ? monitor.status : "unknown"}</strong>
+          </div>
+          <div className="row">
+            <span>Last checked block</span>
+            <strong>
+              {monitor?.lastCheckedBlock === undefined
+                ? "not reported"
+                : monitor.lastCheckedBlock.toLocaleString()}
+            </strong>
           </div>
           <div className="row">
             <span>Policy signing</span>
@@ -102,6 +111,11 @@ export default function NetworkPage() {
               {backend.health?.policySigningEnabled ? "enabled" : "disabled"}
             </strong>
           </div>
+          <p className="muted" role="status" aria-live="polite">
+            {monitor?.lastCheckedBlock === undefined
+              ? "The backend has not reported a scanned block yet."
+              : `The monitor has scanned Sepolia up to block ${monitor.lastCheckedBlock.toLocaleString()}. A block number that stops advancing means the backend monitor is stalled.`}
+          </p>
         </div>
       </div>
 

@@ -59,13 +59,18 @@ export type ExecutionResponse = {
   recipient: string;
 };
 
+export type SepoliaMonitorStatus = {
+  status: string;
+  lastCheckedBlock?: number;
+};
+
 export type BackendHealth = {
   status: string;
   service?: string;
   chainId?: number;
   policySigningEnabled?: boolean;
   localDemoMode?: boolean;
-  sepoliaMonitor?: string;
+  sepoliaMonitor?: SepoliaMonitorStatus;
 };
 
 export type ActivityRow = {

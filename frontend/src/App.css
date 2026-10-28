@@ -297,11 +297,26 @@ code {
   max-width: 560px;
 }
 
-.swap-inputs label {
+.swap-inputs label,
+.swap-field label {
   display: grid;
   gap: 8px;
   color: #aeb5c2;
   font-size: 13px;
+}
+
+.swap-field {
+  display: grid;
+  gap: 8px;
+}
+
+.swap-balance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #8d96a5;
 }
 
 .swap-input-row {
@@ -390,6 +405,35 @@ code {
   color: #aeb5c2;
   font-size: 13px;
   margin: 14px 0 0;
+}
+
+.page-stack .card label {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  color: #aeb5c2;
+  font-size: 13px;
+}
+
+.field-label {
+  display: block;
+  margin: 12px 0 8px;
+  color: #aeb5c2;
+  font-size: 13px;
+}
+
+.page-stack .card label input {
+  min-width: 0;
+  border: 1px solid #303744;
+  background: #090c11;
+  color: white;
+  border-radius: 10px;
+  padding: 11px 12px;
+  outline: none;
+}
+
+.page-stack .card label input:focus {
+  border-color: #6875ff;
 }
 
 .risk-panel {

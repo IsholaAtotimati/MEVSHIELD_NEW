@@ -79,17 +79,25 @@ export default function PoliciesPage() {
 
       <div className="card">
         <h2>Inspect by policy ID</h2>
+        <label className="field-label" htmlFor="policy-inspect-id">
+          Policy ID (0x-prefixed 32-byte hash)
+        </label>
         <div className="policy-form">
           <input
+            id="policy-inspect-id"
             value={inspectId}
             onChange={(event) => setInspectId(event.target.value as Hex)}
             placeholder="0x..."
+            autoComplete="off"
+            spellCheck={false}
           />
           <button type="button" onClick={() => void inspect()}>
             Inspect
           </button>
         </div>
-        <p>{inspectText}</p>
+        <p className="policy-result" role="status" aria-live="polite">
+          {inspectText}
+        </p>
       </div>
 
       <div className="card">

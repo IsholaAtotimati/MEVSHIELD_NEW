@@ -31,6 +31,7 @@ type UseExecutionArgs = {
   setAccount: (address: Address) => void;
   ensureSepolia: () => Promise<void>;
   refreshBalance: (address: Address) => Promise<void>;
+  refreshInputBalance: (address?: Address | null) => Promise<void>;
   inputToken: TokenSymbol;
   inputAmountBaseUnits: bigint | null;
   zeroForOne: boolean | null;
@@ -64,6 +65,7 @@ export function useExecution(args: UseExecutionArgs) {
       setAccount,
       ensureSepolia,
       refreshBalance,
+      refreshInputBalance,
       loadPolicyById,
       setActionStatus,
     } = args;
@@ -311,6 +313,7 @@ export function useExecution(args: UseExecutionArgs) {
 
       await loadPolicyById(result.policyId as Hex);
       await refreshBalance(payer);
+      await refreshInputBalance(payer);
     } catch (error) {
       console.error(error);
       logFrontend("transaction_failed", {

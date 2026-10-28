@@ -19,6 +19,7 @@ import { useExecution } from "../hooks/useExecution";
 import { usePolicy } from "../hooks/usePolicy";
 import { useProtectedQuote } from "../hooks/useProtectedQuote";
 import { useProtocol } from "../hooks/useProtocol";
+import { useTokenBalance } from "../hooks/useTokenBalance";
 import { useWallet } from "../hooks/useWallet";
 import {
   calculateDemoOutput,
@@ -53,6 +54,11 @@ function useTradeState() {
   const [inputAmount, setInputAmount] = useState("");
   const [slippageBps, setSlippageBps] = useState(50);
   const [clearExecutionTick, setClearExecutionTick] = useState(0);
+
+  const inputTokenBalance = useTokenBalance(
+    wallet.account,
+    SWAP_TOKENS[inputToken].address,
+  );
 
   const inputAmountBaseUnits = parseTokenAmount(
     inputAmount,
@@ -114,6 +120,7 @@ function useTradeState() {
     setAccount: wallet.setAccount,
     ensureSepolia: wallet.ensureSepolia,
     refreshBalance: wallet.refreshBalance,
+    refreshInputBalance: inputTokenBalance.refresh,
     inputToken,
     inputAmountBaseUnits,
     zeroForOne,
@@ -186,6 +193,8 @@ function useTradeState() {
     slippageBps,
     setSlippageBps,
     inputAmountBaseUnits,
+    inputTokenBalance: inputTokenBalance.balance,
+    refreshInputTokenBalance: inputTokenBalance.refresh,
     zeroForOne,
     quoteIsFresh,
     demoEstimateBaseUnits,

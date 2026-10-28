@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { BACKEND_URL } from "../config/env";
+import { parseHealthBody } from "../lib/apiValidation";
 import type { BackendHealth } from "../lib/types";
 
 export type BackendHealthState = "checking" | "ok" | "failed";
@@ -19,7 +20,12 @@ export function useBackendHealth() {
         setHealth(null);
         return;
       }
-      const body = (await response.json()) as BackendHealth;
+      const body = parseHealthBody(await response.json());
+      if (!body) {
+        setHealthState("failed");
+        setHealth(null);
+        return;
+      }
       if (body.status !== "ok") {
         setHealthState("failed");
         setHealth(body);

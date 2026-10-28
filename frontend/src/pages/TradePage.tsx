@@ -29,6 +29,7 @@ export default function TradePage() {
     inputToken,
     outputToken,
     inputAmount,
+    inputTokenBalance,
     slippageBps,
     setSlippageBps,
     demoEstimateBaseUnits,
@@ -92,6 +93,7 @@ export default function TradePage() {
           inputToken={inputToken}
           outputToken={outputToken}
           inputAmount={inputAmount}
+          inputBalance={inputTokenBalance}
           swapTokens={SWAP_TOKENS}
           demoMode={SEPOLIA_DEMO_MODE}
           demoEstimateBaseUnits={demoEstimateBaseUnits}
@@ -192,8 +194,10 @@ export default function TradePage() {
 
         {inputToken === "ETH" && (
           <p className="muted">
-            Swaps use WETH in the pool. Wrap native ETH on the{" "}
-            <Link to="/portfolio">Portfolio</Link> page if needed.
+            The balance above is your <strong>WETH</strong> balance, because the
+            protected swap spends WETH, not native ETH. Unwrapped ETH is not
+            touched — wrap it first on the <Link to="/portfolio">Portfolio</Link>{" "}
+            page.
           </p>
         )}
 
@@ -213,14 +217,16 @@ export default function TradePage() {
         </button>
 
         {checklist.length > 0 && (
-          <ul className="readiness-checklist">
+          <ul className="readiness-checklist" aria-live="polite">
             {checklist.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
         )}
 
-        <p className="action-status">{policy.actionStatus}</p>
+        <p className="action-status" role="status" aria-live="polite">
+          {policy.actionStatus}
+        </p>
 
         {policy.policy?.registered && (
           <button

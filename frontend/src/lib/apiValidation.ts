@@ -1,6 +1,63 @@
-import type { PolicyResponse, RiskPreviewResult } from "./types";
+import type {
+  BackendHealth,
+  PolicyResponse,
+  RiskPreviewResult,
+  SepoliaMonitorStatus,
+} from "./types";
 
 const DECIMAL_STRING = /^\d+$/;
+
+const MONITOR_STATUSES = ["starting", "connected", "error", "disabled"];
+
+function parseSepoliaMonitor(value: unknown): SepoliaMonitorStatus | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const monitor = value as Record<string, unknown>;
+  if (
+    typeof monitor.status !== "string" ||
+    !MONITOR_STATUSES.includes(monitor.status)
+  ) {
+    return undefined;
+  }
+  const lastCheckedBlock = monitor.lastCheckedBlock;
+  if (
+    lastCheckedBlock !== undefined &&
+    !(typeof lastCheckedBlock === "number" &&
+      Number.isSafeInteger(lastCheckedBlock) &&
+      lastCheckedBlock >= 0)
+  ) {
+    return undefined;
+  }
+  return {
+    status: monitor.status,
+    ...(typeof lastCheckedBlock === "number" ? { lastCheckedBlock } : {}),
+  };
+}
+
+/**
+ * Validates GET /health. Returns null when the body is not a health payload;
+ * an unrecognised `sepoliaMonitor` shape is dropped rather than trusted so the
+ * Network page never renders "[object Object]".
+ */
+export function parseHealthBody(body: unknown): BackendHealth | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.status !== "string") return null;
+
+  const monitor = parseSepoliaMonitor(record.sepoliaMonitor);
+
+  return {
+    status: record.status,
+    ...(typeof record.service === "string" ? { service: record.service } : {}),
+    ...(typeof record.chainId === "number" ? { chainId: record.chainId } : {}),
+    ...(typeof record.policySigningEnabled === "boolean"
+      ? { policySigningEnabled: record.policySigningEnabled }
+      : {}),
+    ...(typeof record.localDemoMode === "boolean"
+      ? { localDemoMode: record.localDemoMode }
+      : {}),
+    ...(monitor ? { sepoliaMonitor: monitor } : {}),
+  };
+}
 
 function isRiskLevel(
   value: unknown,
