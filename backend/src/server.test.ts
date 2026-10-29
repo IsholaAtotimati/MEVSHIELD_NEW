@@ -12,7 +12,19 @@ import {
   MAX_SQRT_PRICE_LIMIT_X96,
   MIN_SQRT_PRICE_LIMIT_X96,
 } from "./policy/policyRequest.js";
+import { PoolStateUnavailableError } from "./risk/poolState.js";
 import { createApp, type AppDependencies } from "./server.js";
+
+const UNIT_SQRT_PRICE_X96 = 1n << 96n;
+
+/** Deep unit-price pool. A 1e6 input is far below a 10 bps impact. */
+function deepPoolReader(): AppDependencies["readPoolState"] {
+  return async () => ({
+    sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+    liquidity: 10n ** 30n,
+    feePips: 3000n,
+  });
+}
 
 function futureExpiry(secondsFromNow = 300): string {
   return String(Math.floor(Date.now() / 1000) + secondsFromNow);
@@ -73,6 +85,7 @@ function baseDeps(
       status: "disabled",
       lastCheckedBlock: 42,
     }),
+    readPoolState: deepPoolReader(),
     ...overrides,
   };
 }
@@ -118,16 +131,107 @@ test("GET /health exposes monitor last checked block", async () => {
   assert.equal(monitor.lastCheckedBlock, 42);
 });
 
-test("POST /risk-preview returns deterministic MVP metadata", async () => {
+test("POST /risk-preview estimates price impact for a small trade as LOW", async () => {
   const response = await requestJson(createApp(baseDeps()), "POST", "/risk-preview", {
     amountSpecified: "1000000",
     zeroForOne: true,
   });
 
   assert.equal(response.status, 200);
+  assert.equal(response.json.estimatedLoss, "7");
+  assert.equal(response.json.estimatedFee, "3000");
+  assert.equal(response.json.maxLoss, "14");
+  assert.equal(response.json.maxFee, "6000");
   assert.equal(response.json.riskLevel, "LOW");
-  assert.equal(response.json.model, "deterministic-mvp");
-  assert.match(String(response.json.disclaimer), /Not a live market-risk measurement/);
+  assert.equal(response.json.model, "active-liquidity-impact");
+  assert.match(String(response.json.disclaimer), /current pool state for this trade size/);
+  assert.doesNotMatch(String(response.json.disclaimer), /amount\/1000|sandwich-attack probability/);
+});
+
+test("POST /risk-preview returns MEDIUM when impact is between 10 and 50 bps", async () => {
+  const response = await requestJson(
+    createApp(
+      baseDeps({
+        readPoolState: async () => ({
+          sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+          liquidity: 10_000_000n,
+          feePips: 0n,
+        }),
+      }),
+    ),
+    "POST",
+    "/risk-preview",
+    { amountSpecified: "30501", zeroForOne: true },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.estimatedLoss, "93");
+  assert.equal(response.json.riskLevel, "MEDIUM");
+});
+
+test("POST /risk-preview returns HIGH when active liquidity cannot support the trade", async () => {
+  const response = await requestJson(
+    createApp(
+      baseDeps({
+        readPoolState: async () => ({
+          sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+          liquidity: 1_000n,
+          feePips: 0n,
+        }),
+      }),
+    ),
+    "POST",
+    "/risk-preview",
+    { amountSpecified: "5000", zeroForOne: true },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.estimatedLoss, "5000");
+  assert.equal(response.json.riskLevel, "HIGH");
+  assert.notEqual(response.json.estimatedLoss, "5");
+});
+
+test("POST /risk-preview fails closed when the pool read fails", async () => {
+  const response = await requestJson(
+    createApp(
+      baseDeps({
+        readPoolState: async () => {
+          throw new PoolStateUnavailableError(
+            "Protected pool slot0 could not be read.",
+          );
+        },
+      }),
+    ),
+    "POST",
+    "/risk-preview",
+    { amountSpecified: "1000000", zeroForOne: true },
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.json.code, "pool_state_unavailable");
+  assert.equal(response.json.estimatedLoss, undefined);
+  assert.match(String(response.json.error), /could not be read/);
+});
+
+test("POST /policy fails closed when the pool read fails and does not sign", async () => {
+  const response = await requestJson(
+    createApp(
+      v2SigningDeps({
+        readPoolState: async () => {
+          throw new PoolStateUnavailableError(
+            "Protected pool slot0 could not be read.",
+          );
+        },
+      }),
+    ),
+    "POST",
+    "/policy",
+    validPolicyBody("100"),
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.json.code, "pool_state_unavailable");
+  assert.equal(response.json.signature, undefined);
 });
 
 test("POST /policy returns 503 when signing is disabled", async () => {

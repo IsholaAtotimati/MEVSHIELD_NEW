@@ -7,6 +7,11 @@ import { fileURLToPath } from "node:url";
 
 import { generatePolicy } from "./policy/policyGenerator.js";
 import {
+  PoolStateUnavailableError,
+  createProtectedPoolReader,
+  type PoolStateReader,
+} from "./risk/poolState.js";
+import {
   previewRisk,
   RiskPreviewRequestSchema,
   RISK_MODEL,
@@ -42,6 +47,7 @@ export type AppDependencies = {
   localDemoMode: boolean;
   signerWallet?: Wallet;
   getMonitorStatus: () => SepoliaMonitorSnapshot;
+  readPoolState: PoolStateReader;
   frontendUrl?: string;
 };
 
@@ -73,6 +79,11 @@ export function loadAppDependencies(
     localDemoMode,
     signerWallet: backendConfig.signerWallet,
     getMonitorStatus: startSepoliaMonitor(),
+    readPoolState: createProtectedPoolReader(
+      env,
+      backendConfig.protectedPool,
+      backendConfig.chainId,
+    ),
     frontendUrl: env.FRONTEND_URL,
   };
 }
@@ -119,7 +130,7 @@ export function createApp(deps: AppDependencies): Express {
     res.json(publicProtectedPoolConfig(deps.chainId, deps.protectedPool));
   });
 
-  app.post("/risk-preview", (req, res) => {
+  app.post("/risk-preview", async (req, res) => {
     const parsed = RiskPreviewRequestSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -132,13 +143,30 @@ export function createApp(deps: AppDependencies): Express {
       );
     }
 
-    const result = previewRisk(parsed.data);
-
-    if (!result.ok) {
-      return sendApiError(res, 400, "invalid_preview", result.error);
+    if (BigInt(parsed.data.amountSpecified) === 0n) {
+      return sendApiError(
+        res,
+        400,
+        "invalid_preview",
+        "amountSpecified must not be zero",
+      );
     }
 
-    return res.json(result.data);
+    try {
+      const pool = await deps.readPoolState();
+      const result = previewRisk(parsed.data, pool);
+
+      if (!result.ok) {
+        return sendApiError(res, 400, "invalid_preview", result.error);
+      }
+
+      return res.json(result.data);
+    } catch (error) {
+      if (error instanceof PoolStateUnavailableError) {
+        return sendApiError(res, 503, "pool_state_unavailable", error.message);
+      }
+      return sendApiError(res, 500, "internal_error", "Internal error");
+    }
   });
 
   app.post("/policy", async (req, res) => {
@@ -227,16 +255,20 @@ export function createApp(deps: AppDependencies): Express {
         zeroForOne: input.zeroForOne,
       });
 
-      const result = generatePolicy({
-        poolId: input.poolId,
-        trader: input.trader,
-        nonce: BigInt(input.nonce),
-        expiry: BigInt(input.expiry),
-        amountSpecified: BigInt(input.amountSpecified),
-        zeroForOne: input.zeroForOne,
-        sqrtPriceLimitX96: BigInt(input.sqrtPriceLimitX96),
-        minAmountOut: BigInt(input.minAmountOut),
-      });
+      const pool = await deps.readPoolState();
+      const result = generatePolicy(
+        {
+          poolId: input.poolId,
+          trader: input.trader,
+          nonce: BigInt(input.nonce),
+          expiry: BigInt(input.expiry),
+          amountSpecified: BigInt(input.amountSpecified),
+          zeroForOne: input.zeroForOne,
+          sqrtPriceLimitX96: BigInt(input.sqrtPriceLimitX96),
+          minAmountOut: BigInt(input.minAmountOut),
+        },
+        pool,
+      );
 
       logEvent("info", "risk_analysis_completed", {
         requestId,
@@ -308,6 +340,10 @@ export function createApp(deps: AppDependencies): Express {
         errorName: error instanceof Error ? error.name : "UnknownError",
         errorMessage: error instanceof Error ? error.message : String(error),
       });
+
+      if (error instanceof PoolStateUnavailableError) {
+        return sendApiError(res, 503, "pool_state_unavailable", error.message);
+      }
 
       if (error instanceof z.ZodError) {
         return sendApiError(res, 400, "invalid_request", "Invalid request", {

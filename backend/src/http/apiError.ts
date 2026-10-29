@@ -29,6 +29,7 @@ export type ApiErrorCode =
   | "not_found"
   | "policy_signing_disabled"
   | "signer_unavailable"
+  | "pool_state_unavailable"
   | "internal_error";
 
 export type ApiErrorBody = {

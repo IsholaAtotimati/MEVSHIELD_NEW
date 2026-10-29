@@ -273,35 +273,48 @@ The implementation uses structured policy data and EIP-712-related signing and v
 
 ## Risk Assessment
 
-The current MVP uses a deterministic, rule-based model.
+The backend estimates price impact from the current pool state for this trade size. It reads the pool's `sqrtPriceX96`, active liquidity, and swap fee, then quotes the trade against that active liquidity as a constant-product depth proxy.
 
-It does **not** currently claim to predict market movements, identify every sandwich attack, or use an AI model to calculate risk.
+It does not read the mempool, detect sandwich attacks, predict execution, or use an AI model. The figure is not a guarantee of realized loss.
 
 ### Current calculation
 
-In the current simplified implementation, the engine uses the absolute value of the specified amount:
+`amount` is the absolute value of `amountSpecified`. `zeroForOne` selects which token is the input. `L` is active liquidity and `sqrtP` is `sqrtPriceX96`.
 
 ```text
-absoluteAmount = abs(amountSpecified)
+fee        = amount * feePips / 1_000_000
+amountIn   = amount - fee
+estimatedFee = fee
 
-estimatedLoss = absoluteAmount / 1000
-estimatedFee  = absoluteAmount / 10000
+zeroForOne:
+  nextSqrt = ceil(L * 2^96 * sqrtP / (L * 2^96 + amountIn * sqrtP))
+  amountOut = L * (sqrtP - nextSqrt) / 2^96
+  outputValueInInput = amountOut * 2^96 / sqrtP * 2^96 / sqrtP
 
-maxLoss = estimatedLoss * 2
-maxFee  = estimatedFee * 2
+oneForZero:
+  nextSqrt = sqrtP + amountIn * 2^96 / L
+  amountOut = L * 2^96 * (nextSqrt - sqrtP) / (nextSqrt * sqrtP)
+  outputValueInInput = amountOut * sqrtP / 2^96 * sqrtP / 2^96
+
+estimatedLoss = amountIn - outputValueInInput
+lossBps       = estimatedLoss * 10_000 / amount
+maxLoss       = estimatedLoss * 2
+maxFee        = estimatedFee * 2
 ```
 
-`estimatedLoss` and `estimatedFee` are fixed fractions of the absolute amount. They scale linearly with trade size and never consult pool state, a quote, observed gas, or market data. `maxLoss` and `maxFee` are then simply twice those estimates.
+`estimatedLoss` is the shortfall versus selling the post-fee input at the spot price with no curvature. The swap fee is `estimatedFee`, not part of that shortfall. Integer division rounds the output value down.
 
-The risk level is the single literal `LOW` for every non-zero amount, because the fixed 0.1 percent loss model runs identically for every request and cannot produce a higher band. The engine returns `LOW` unconditionally; a zero amount never reaches it through the API, which rejects that request.
+| `lossBps` | `riskLevel` |
+|---|---|
+| `<= 10` | `LOW` |
+| `<= 50` | `MEDIUM` |
+| `> 50` | `HIGH` |
 
-There are no MEDIUM or HIGH bands in the current engine. The model divides by a constant, so it has no input that could raise a category, and no threshold comparison exists in the code. Earlier versions of this document published a three-level table keyed on a basis-point loss figure. The backend no longer computes that figure at all, so the table described a model that does not run.
+If active liquidity cannot support the trade (no liquidity, the input exhausts the virtual reserve, the next price leaves the Uniswap tick bounds, or the quote rounds to zero output), `estimatedLoss` is the full input amount and the level is `HIGH`. A failed pool read returns an error. The server does not fall back to `amount / 1000`.
 
-These formulas are part of the current MVP, not a validated financial model.
+`/risk-preview` and `/policy` both use this function. The response disclaimer states the same limit: the number is a price-impact estimate from current pool state for this trade size.
 
-**Important limitations:** The current calculation is simplified and is not a complete market-aware estimate of slippage, price impact, swap fees, or MEV exposure. Its output should not be interpreted as a guarantee of realized loss or execution quality. Swap direction is not currently used in the simplified risk calculation.
-
-The long-term objective is to improve the risk model with better quote integration, pool-state information, execution simulation, and measurable evaluation against defined threat scenarios.
+**Important limitations:** Active liquidity is assumed to remain available for the whole trade. The model does not walk neighboring ticks, so a swap that leaves the current range can cost more than the estimate. It does not observe other transactions, gas, or whether a minimum-output check would revert. `maxLoss` and `maxFee` are twice the estimates. The hook still compares those caps to caller-supplied values in `hookData`; it does not measure this loss.
 
 ---
 

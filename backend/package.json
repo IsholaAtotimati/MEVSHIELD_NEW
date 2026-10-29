@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/config/runtimeConfig.test.ts src/config/env.test.ts src/policy/eip712.test.ts src/policy/policyRequest.test.ts src/policy/policySigning.test.ts src/risk/riskEngine.test.ts src/observability/requestCorrelation.test.ts src/risk/riskPreview.test.ts src/monitor/sepolia.test.ts src/server.test.ts",
+    "test": "tsx --test src/config/runtimeConfig.test.ts src/config/env.test.ts src/policy/eip712.test.ts src/policy/policyRequest.test.ts src/policy/policySigning.test.ts src/risk/riskEngine.test.ts src/risk/poolState.test.ts src/observability/requestCorrelation.test.ts src/risk/riskPreview.test.ts src/monitor/sepolia.test.ts src/server.test.ts",
     "dev": "tsx src/server.ts",
     "demo": "NODE_ENV=development MEVSHIELD_SEPOLIA_DEMO_ENABLED=true tsx src/server.ts",
     "signer:test": "tsx scripts/testSigner.ts",

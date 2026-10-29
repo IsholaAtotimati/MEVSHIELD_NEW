@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { calculateRisk } from "./riskEngine.js";
+import type { ActivePoolState } from "./poolState.js";
+import { calculateRisk, type RiskLevel } from "./riskEngine.js";
 
-export const RISK_MODEL = "deterministic-mvp" as const;
+export const RISK_MODEL = "active-liquidity-impact" as const;
 export const RISK_PREVIEW_DISCLAIMER =
-  "Formula-based estimates only. Not a live market-risk measurement or a prediction of sandwich-attack probability.";
+  "Estimates price impact from the current pool state for this trade size. It does not read the mempool or detect sandwich attacks.";
 
 export const RiskPreviewRequestSchema = z.object({
   amountSpecified: z.string().regex(/^-?\d{1,78}$/),
@@ -17,13 +18,14 @@ export type RiskPreviewResponse = {
   estimatedFee: string;
   maxLoss: string;
   maxFee: string;
-  riskLevel: "LOW";
+  riskLevel: RiskLevel;
   model: typeof RISK_MODEL;
   disclaimer: string;
 };
 
 export function previewRisk(
   input: RiskPreviewRequest,
+  pool: ActivePoolState,
 ):
   | { ok: true; data: RiskPreviewResponse }
   | { ok: false; error: string } {
@@ -36,6 +38,9 @@ export function previewRisk(
   const result = calculateRisk({
     amountSpecified,
     zeroForOne: input.zeroForOne,
+    sqrtPriceX96: pool.sqrtPriceX96,
+    liquidity: pool.liquidity,
+    feePips: pool.feePips,
   });
 
   return {
