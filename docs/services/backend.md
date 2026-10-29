@@ -176,7 +176,7 @@ cd backend
 npm ci
 npm run dev     # tsx src/server.ts
 npm run demo    # tsx with NODE_ENV=development and MEVSHIELD_SEPOLIA_DEMO_ENABLED=true
-npm test        # node:test across eight suites
+npm test        # the files named in backend/package.json
 npm run build   # tsc, output to backend/dist
 npm start       # node dist/server.js
 ```

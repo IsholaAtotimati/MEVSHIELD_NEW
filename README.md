@@ -675,7 +675,7 @@ A useful contribution should:
 4. Describe security implications and assumptions.
 5. Avoid introducing undocumented changes to deployment or authorization behavior.
 
-For smart-contract changes, run the relevant Foundry tests before opening a pull request.
+For smart-contract changes, run the relevant Foundry tests before opening a pull request. The commands for this repository, and the gates that stay closed, are in [docs/guides/developing.md](docs/guides/developing.md). Commit messages use the subject and bullet shape in [docs/guides/committing.md](docs/guides/committing.md). To prove the branch, start at [docs/runbook/how-to-test.md](docs/runbook/how-to-test.md).
 
 Do not include private keys, credentials, populated `.env` files, or sensitive production data in commits or issue reports.
 

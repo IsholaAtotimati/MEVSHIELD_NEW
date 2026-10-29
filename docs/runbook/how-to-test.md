@@ -97,7 +97,7 @@ forge test
 
 CI runs the same suite as `forge test -vvv` after `forge fmt --check` and `forge build --sizes` (`.github/workflows/test.yml`). No CI job sets a `RUN_SEPOLIA_FORK_*` flag.
 
-`test/SepoliaForkSandwich.t.sol` calls `vm.skip(true)` in `setUp` when `RUN_SEPOLIA_FORK_SANDWICH` is absent. A plain `forge test` skips that file, including when you pass no fork URL. The other fork suites skip the same way unless their own flags are set. [sepolia-fork-sandwich.md](sepolia-fork-sandwich.md) records `forge test --offline` on this tree as 88 passed, 6 skipped, 0 failed, 94 total. [docs/operations/testing.md](../operations/testing.md) still describes an earlier total with five skipped fork suites. The later record is the sandwich runbook.
+`test/SepoliaForkSandwich.t.sol` calls `vm.skip(true)` in `setUp` when `RUN_SEPOLIA_FORK_SANDWICH` is absent. A plain `forge test` skips that file, including when you pass no fork URL. The other fork suites skip the same way unless their own flags are set. [sepolia-fork-sandwich.md](sepolia-fork-sandwich.md) records `forge test --offline` on this tree as 88 passed, 6 skipped, 0 failed, 94 total. [Testing](../operations/testing.md) lists the files those suites run. The sandwich runbook is the recorded pass count.
 
 Backend. The `test` script in `backend/package.json` is:
 

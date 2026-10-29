@@ -156,7 +156,7 @@ Shows the current session policy, inspects any policy id through `getPolicy` and
 
 ### Network
 
-Six contract rows compared against expected constants, an authorized-signer row, backend health and monitor state, and the registry owner. The three rows sourced from `useProtocol` show a live pass or mismatch. Two rows, `MEVShieldHook` and `MEVShieldRouter`, compare a constant against itself and so always pass; `PolicyAuthorization` compares against `CONTRACTS.poolAuthorization`, which is the same literal as `CONTRACTS.policyAuthorization` ([frontend/src/pages/NetworkPage.tsx:18](../../frontend/src/pages/NetworkPage.tsx#L18)). Those three rows are static assertions of the configuration, not verification of on-chain state.
+Six contract rows from `buildVerificationRows`, an authorized-signer row, backend health and monitor state, and the registry owner. PoolManager, PolicyRegistry, PolicyVerifier, and PolicyAuthorization compare a configured address with a chain read and can show Pass or Mismatch. MEVShieldHook and MEVShieldRouter have no on-chain source, so they stay Not checked. See [network status](../features/network-status.md).
 
 ## Wallet interaction
 
@@ -164,7 +164,7 @@ Six contract rows compared against expected constants, an authorized-signer row,
 
 `ensureSepolia` switches the chain when the wallet is on another network ([frontend/src/hooks/useWallet.ts:34](../../frontend/src/hooks/useWallet.ts#L34)). It is called before registration and before execution.
 
-The public client uses a fixed public RPC endpoint, `https://ethereum-sepolia-rpc.publicnode.com`, hard-coded in both the chain definition and the transport ([frontend/src/lib/contracts.ts:3](../../frontend/src/lib/contracts.ts#L3), [frontend/src/lib/viem.ts:12](../../frontend/src/lib/viem.ts#L12)). There is no environment variable for the read RPC, and no fallback transport.
+The public client takes its chain and transport from `frontend/src/config/chain.ts`. The default RPC is the public Sepolia endpoint. `VITE_CHAIN_ID` and `VITE_RPC_URL` override it at build time, and an empty environment stays on Sepolia. There is no fallback transport.
 
 ## Telemetry
 
@@ -174,12 +174,12 @@ Frontend logs are JSON lines on the browser console, prefixed with `service: "me
 
 ## Known limitations
 
-- No quote is ever produced. Stage 1 always ends at `quote-simulation-unavailable`, so outside demo mode the UI cannot reach the risk check at all, independently of the `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` gate.
+- `assessProtectedPool` still ends at `quote-simulation-unavailable` once the pool snapshot is fresh, because spot state is not a swap simulation. Outside demo mode that blocks Check protection. Demo mode fills the receive field from the deterministic estimate. On chain 31337 a production bundle may use that estimate. On Sepolia, demo mode still requires the Vite dev server. See `resolveDemoMode` in `frontend/src/config/chainEnv.ts` and [local test flow](../runbook/local-test-flow.md).
 - The expiry the UI requests comes from `buildPolicyExpiry` in [frontend/src/config/policy.ts](../../frontend/src/config/policy.ts), which adds `POLICY_TTL_SECONDS` (10 minutes) to the current clock ([frontend/src/hooks/usePolicy.ts:305](../../frontend/src/hooks/usePolicy.ts#L305)). The file also exports `POLICY_MAX_TTL_SECONDS`, a copy of the backend ceiling, so the client can assert its request stays inside it. The backend constant remains the source of truth; the copy is a mirror, and `frontend/src/config/policy.test.mjs` catches drift between the two at test time rather than at runtime.
 - The pool-state reader depends on PoolManager storage slots computed by hand.
-- The read RPC is hard-coded and unauthenticated, so the UI's notion of pool state inherits that endpoint's availability and correctness.
+- The default read RPC is a public unauthenticated Sepolia endpoint. `VITE_RPC_URL` can replace it, and the UI's notion of pool state inherits that endpoint's availability and correctness.
 - The activity feed fetches one transaction per log to filter by sender, over a 50,000-block window, with no batching or caching. A wallet with many interactions will issue many RPC calls per refresh.
-- Three of the six Network page rows are static comparisons and cannot detect a mismatch.
+- The hook and router rows on the Network page have no on-chain source, so they stay Not checked. The other four compare a configured address with a chain read.
 - `frontend/src/App.tsx.before-swap-label-fix`, an unused copy of an earlier `App.tsx`, has been removed from the tree.
 
 ## Running the app
@@ -189,12 +189,12 @@ cd frontend
 npm ci
 npm run dev     # vite
 npm run demo    # vite --mode demo
-npm test        # node --experimental-strip-types --test src/lib/*.test.mjs
+npm test        # the files named in frontend/package.json
 npm run lint    # oxlint
 npm run build   # tsc -b && vite build
 ```
 
-`npm run demo` runs Vite in the `demo` mode. Demo mode in the app additionally requires `VITE_SEPOLIA_DEMO_MODE=true` at build time and `import.meta.env.DEV` to be true ([frontend/src/config/env.ts:4](../../frontend/src/config/env.ts#L4)), so a production build cannot enter demo mode.
+`npm run demo` runs Vite in the `demo` mode. Demo mode still requires `VITE_SEPOLIA_DEMO_MODE=true`. On Sepolia it also requires the Vite dev server, so a production Sepolia bundle stays off that path. On chain 31337 a production bundle may use the deterministic estimate. See `resolveDemoMode` in `frontend/src/config/chainEnv.ts`.
 
 ## Related pages
 

@@ -1,5 +1,7 @@
 # Session handover, 28 October 2026
 
+The branch tips in this note are the refs as they stood that day. `feature/sepolia-fork-demo` later reworded the commits it contains. The other branches named here were not moved, so these ids are still what those refs point at. The [changelog](changelog-since-8a676f6d.md) uses the reworded ids for the same trees.
+
 ## Where the branches stand
 
 `integration/local-demo-full` is the integration head. It points at `e549ce85`

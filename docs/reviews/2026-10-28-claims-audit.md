@@ -1,6 +1,6 @@
 # Claims audit, 28 October 2026
 
-Read-only audit of factual claims made about this repository and about the deployed Sepolia router, by the project owner and by earlier agents. Branch `feature/web-app-redesign` at `a0120d96`. Every repository claim below was checked against that commit with `git show <rev>:<path>`, not against the working tree, because the working tree was being edited concurrently while this audit ran.
+Read-only audit of factual claims made about this repository and about the deployed Sepolia router, by the project owner and by earlier agents. Branch `feature/web-app-redesign` at `a0120d96`. Every repository claim below was checked against that commit with `git show <rev>:<path>`, not against the working tree, because the working tree was being edited concurrently while this audit ran. On `feature/sepolia-fork-demo` that same tree is `4a20bf02`, after the commit subjects were reworded. The files the commands read are unchanged. `feature/web-app-redesign` itself was not moved, so `a0120d96` is still that branch's commit.
 
 Nothing in `src/`, `test/`, `frontend/`, `backend/` or `foundry.toml` was modified. The only file written is this one.
 

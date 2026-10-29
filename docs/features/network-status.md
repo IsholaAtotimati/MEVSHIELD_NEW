@@ -1,6 +1,6 @@
 # Network status
 
-**Status: partial.** The page reads live deployment state for four of its six contract rows and reports backend health and monitor state. The remaining two rows compare constants to themselves, and the page cannot detect the deployment drift that matters most.
+**Status: partial.** Four of the six contract rows compare a configured address with a value read from chain. The hook and the router have no on-chain source, so those rows stay Not checked. The page also reports backend health and monitor state. It still cannot detect the deployment drift that matters most, which is bytecode.
 
 The Network page is the operator-facing view of whether the app is pointed at the right contracts and whether the backend is alive.
 
@@ -8,20 +8,18 @@ The Network page is the operator-facing view of whether the app is pointed at th
 
 ### Contract verification
 
-Six rows, each with a name, an expected address, an observed address and a pass or mismatch verdict ([frontend/src/pages/NetworkPage.tsx:18](../../frontend/src/pages/NetworkPage.tsx#L18)).
+Six rows, built by `buildVerificationRows` in [frontend/src/lib/networkVerification.ts](../../frontend/src/lib/networkVerification.ts). A row reaches Pass or Mismatch only when the observed value was read from chain. A missing read is Not checked, with the reason `no chain read yet`. It is not a pass.
 
-| Row | Expected | Observed from | Can this row ever fail |
+| Row | Expected | Observed from | Verdict |
 | --- | --- | --- | --- |
-| PoolManager | `0xE03A…3543` | `MEVShieldHook.poolManager()` | Yes |
-| MEVShieldHook | `0xd15E…0080` | The same constant | No |
-| PolicyRegistry | `0xB289…1c9E` | `PolicyAuthorization.registry()` | Yes |
-| PolicyVerifier | `0x716f…b79f` | `PolicyAuthorization.verifier()` | Yes |
-| PolicyAuthorization | `0xefC9…d7c5` | The same constant, under a second key | No |
-| MEVShieldRouter | `0x6332…150D` | The same constant | No |
+| PoolManager | Configured `poolManager` | `MEVShieldHook.poolManager()` | Pass or Mismatch once the read returns |
+| MEVShieldHook | Configured hook | None. No PoolManager getter names the hook for this pool | Not checked, `no on-chain source` |
+| PolicyRegistry | Configured registry | `PolicyAuthorization.registry()` | Pass or Mismatch once the read returns |
+| PolicyVerifier | Configured verifier | `PolicyAuthorization.verifier()` | Pass or Mismatch once the read returns |
+| PolicyAuthorization | Configured authorization | `MEVShieldHook.authorization()` | Pass or Mismatch once the read returns |
+| MEVShieldRouter | Configured router | None. Nothing on chain records which router this app expects | Not checked, `no on-chain source` |
 
-Three rows are tautologies. `observed` for the hook and the router is the constant itself, and `CONTRACTS.poolAuthorization` is the same literal string as `CONTRACTS.policyAuthorization` ([frontend/src/lib/contracts.ts:28](../../frontend/src/lib/contracts.ts#L28)). Those rows always render Pass. They document the configuration, they do not verify it.
-
-The other three do verify something: the hook's PoolManager immutable, and the authorization contract's registry and verifier immutables.
+The hook and router rows used to compare a constant with itself, and PolicyAuthorization compared two keys that held the same literal, so those three rows could not fail. They now either read a chain value or say they were not checked. The footer on the card says the same thing.
 
 ### Deployment readiness
 
@@ -53,7 +51,7 @@ A single row showing the registry owner, plus a warning when the pool authorizat
 
 ## Known limitations
 
-- **Three tautological rows.** The hook, router and authorization rows cannot detect a mismatch.
+- **Hook and router rows cannot fail.** Nothing on chain names the hook for the pool or names the router, so those two rows stay Not checked. A wrong hook or router address in the build is not caught here.
 - **No refresh.** `loadProtocol` runs once on mount. After a redeploy, the page shows stale observed values until reload.
 - **No polling for protocol state.** Only the backend health poll is periodic, at 15 seconds.
 - **The row verdict ignores `protocolAddressesVerified`.** A row can show Pass while the derived boolean is false, because the row compares a narrower pair of values. The warning is only rendered for the consumer mismatch.

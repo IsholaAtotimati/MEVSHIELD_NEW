@@ -5,6 +5,8 @@ Date: 28 October 2026
 RPC: `https://ethereum-sepolia-rpc.publicnode.com`  
 Forge: `1.8.6` (solc `0.8.26+commit.8a97fa7a`, EVM `cancun` from HEAD artifact metadata)
 
+The commit ids in this note are the ones the investigation named. `feature/sepolia-fork-demo` later reworded its own history. The same trees on that branch are listed in the [changelog](changelog-since-8a676f6d.md). `fix/router-source-of-truth` was not moved.
+
 ## Hypothesis (from EAE brief)
 
 The deployed router was built from Lukman's uncommitted tree and exposes `protectedPoolId()` / `protectedHook()`, while committed source does not — so bytecode and repo disagree.

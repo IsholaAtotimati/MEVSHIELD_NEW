@@ -22,6 +22,7 @@ docs/*
 !docs/decisions/
 !docs/reviews/
 !docs/runbook/
+!docs/guides/
 
 # Dotenv files - ignore all dotenvs but track examples
 .env

@@ -1,17 +1,19 @@
 # MEVShield documentation
 
-This is the documentation set for the MEVShield repository at branch `feature/web-app-redesign`, commit `a0120d96`. Everything here is derived from the source in this repository. It is not derived from `README.md`, and it is not derived from the older briefs under `docs/eae/` and `docs/assignments/`, which describe router getters that do not exist.
+This is the documentation set for the tree it is committed with, on `feature/sepolia-fork-demo`. Everything here is derived from the source in this repository. It is not derived from `README.md`, and it is not derived from the older briefs under `docs/eae/` and `docs/assignments/`, which describe router getters that do not exist.
 
-If a statement here and a statement in `README.md` disagree, this documentation is the one written against the code.
+If a statement here and a statement in `README.md` disagree, this documentation is the one written against the code. Dated notes under `docs/reviews/` record the day they were written. Where a later commit changed that behaviour, the feature pages, the runbooks, and the changelog are the current description.
 
 ## Where to start
 
 | You are | Start with |
 | --- | --- |
+| Proving the branch, or new to the commands | [How to test](runbook/how-to-test.md), then [Developing](guides/developing.md) |
 | New to the project, want the shape of the system | [Architecture overview](architecture/overview.md) |
 | Auditing what the contracts actually enforce | [Overview: what is enforced on-chain](architecture/overview.md#what-is-enforced-on-chain), then [Contracts](architecture/contracts.md) |
 | Integrating with the backend | [API reference](api/reference.md) |
 | Running or deploying it | [Configuration](operations/configuration.md), then [Testing](operations/testing.md) |
+| Writing a commit | [Committing](guides/committing.md) |
 | Understanding why something is the way it is | [Decisions](decisions/) |
 | Checking whether a user-facing capability works | [Features](features/) |
 
@@ -56,11 +58,11 @@ One page per user-facing capability, each stating its status, what it does, what
 | Page | Status |
 | --- | --- |
 | [protected-swap.md](features/protected-swap.md) | Gated |
-| [risk-preview.md](features/risk-preview.md) | Shipped, with a formula that does not vary by risk |
+| [risk-preview.md](features/risk-preview.md) | Shipped. Price impact from active liquidity; the level can be LOW, MEDIUM, or HIGH |
 | [policy-lifecycle.md](features/policy-lifecycle.md) | Partial: no cancellation, no full-policy commitment, no caller authentication |
 | [activity-history.md](features/activity-history.md) | Partial: local history complete, on-chain history bounded and incomplete |
 | [portfolio-and-approvals.md](features/portfolio-and-approvals.md) | Shipped |
-| [network-status.md](features/network-status.md) | Partial: three of six verification rows are tautologies |
+| [network-status.md](features/network-status.md) | Partial: four rows compare a chain read; the hook and router stay Not checked |
 
 Audience: product readers, testers, and anyone deciding what to build next.
 
@@ -77,9 +79,22 @@ Status vocabulary:
 | --- | --- |
 | [configuration.md](operations/configuration.md) | Every environment variable in all three layers, with required or optional, default, purpose and a safety note |
 | [testing.md](operations/testing.md) | How to run each suite, what each covers, which fork suites are gated, and why the V2 fork suite does not test the deployed router |
+| [runbook/how-to-test.md](runbook/how-to-test.md) | The three commands a lead runs, and what a pass looks like |
 | [runbook/local-docker.md](runbook/local-docker.md) | Bringing the whole stack up locally in Docker against anvil: the images, the compose services, the deploy and seed scripts, the verification script, and the ports |
+| [runbook/local-test-flow.md](runbook/local-test-flow.md) | The chain 31337 page through policy registration |
+| [runbook/sepolia-fork-sandwich.md](runbook/sepolia-fork-sandwich.md) | The fork proof that a worse fill reverts in this repository's router |
+| [reviews/changelog-since-8a676f6d.md](reviews/changelog-since-8a676f6d.md) | What landed after the student's last commit |
 
 Audience: whoever runs the system.
+
+### Guides
+
+Day-to-day notes for someone changing the code.
+
+| Page | Answers |
+| --- | --- |
+| [developing.md](guides/developing.md) | Where the code lives, which commands to run, and which gates to leave closed |
+| [committing.md](guides/committing.md) | The subject and bullet shape for a commit message |
 
 ### Decisions
 
@@ -101,7 +116,7 @@ Audience: anyone who needs to know why a choice was made before changing it.
 
 ## Conventions used here
 
-- File references appear as links with line anchors, for example `src/MEVShieldHook.sol:114`. They point at commit `a0120d96`.
+- File references name a path. A line anchor is a reading aid for the tree that page was checked against, and it drifts when the line moves.
 - "Enforced" means a check that reverts a transaction. "Reports" or "gates" means a check that only influences what a client will submit.
 - Where a constraint is described as enforced somewhere weaker than the product wording implies, the page says so and names the file.
 - Contract addresses, chain ids and pool ids are quoted from source, not from the README.

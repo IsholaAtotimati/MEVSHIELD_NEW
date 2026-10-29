@@ -1,22 +1,22 @@
 # Testing
 
-Three test suites, run separately. Forge covers the contracts. `node:test` covers the backend. `node:test` also covers four frontend modules: the two quote and API-validation helpers, the base-unit formatter, and the policy lifetime constants. There is no end-to-end test and no browser test.
+Three test suites, run separately. Forge covers the contracts. `node:test` covers the backend and the frontend modules named in each `package.json` `test` script. There is no end-to-end test and no browser test. Day-to-day commands are in [Developing](../guides/developing.md). The click-through is [How to test](../runbook/how-to-test.md).
 
 CI runs all three: a Foundry job, a frontend job and a backend job ([.github/workflows/test.yml](../../.github/workflows/test.yml)).
 
 ## Summary
 
-| Suite | Command | Location | Cases | Needs network |
+| Suite | Command | Location | On this branch | Needs network |
 | --- | --- | --- | --- | --- |
-| Contracts | `forge test` | `test/*.t.sol` | 100 `test_` functions across 10 files | No, except the five gated fork suites |
-| Backend | `npm test` in `backend` | `backend/src/**/*.test.ts` | 68 cases across 10 files | No |
-| Frontend | `npm test` in `frontend` | `frontend/src/**/*.test.mjs` | 35 cases across 4 files | No |
+| Contracts | `forge test` | `test/*.t.sol` | 11 files. Six fork suites skip unless their flag is set. [The sandwich runbook](../runbook/sepolia-fork-sandwich.md) records `forge test --offline` as 88 passed, 6 skipped, 94 total | No, except the gated fork suites |
+| Backend | `npm test` in `backend` | The files named in `backend/package.json` | 11 files, including `risk/poolState.test.ts`. The same runbook records 102 passed | No |
+| Frontend | `npm test` in `frontend` | The files named in `frontend/package.json` | 9 files, listed in the frontend section below | No |
 
-The Forge total counts `test_` functions only; fork suites that skip in `setUp` are included in the count because the function still exists. A plain `forge test` reports `88 tests passed, 0 failed, 5 skipped (93 total tests)`: the five gated fork suites report a single skip each because the skip happens in `setUp` before any test function runs.
+The Forge total counts `test_` functions only; fork suites that skip in `setUp` are included in the count because the function still exists. A plain `forge test` skips every gated fork file, including `SepoliaForkSandwich.t.sol`, because the skip happens in `setUp` before any test function runs.
 
-Per-file Forge counts: `PolicyAuthorization.t.sol` 24, `PolicyRegistry.t.sol` 21, `PolicyVerifier.t.sol` 18, `MEVShieldIntegration.t.sol` 15, `MEVShieldHook.t.sol` 10, `SepoliaForkCurrentPoolQuote.t.sol` 4, `SepoliaForkV2Router.t.sol` 3, `SepoliaForkDeploymentAExecution.t.sol` 2, `SepoliaForkQuote.t.sol` 2, `SepoliaForkDeploymentVerification.t.sol` 1.
+Per-file Forge counts from the earlier ten-file tree: `PolicyAuthorization.t.sol` 24, `PolicyRegistry.t.sol` 21, `PolicyVerifier.t.sol` 18, `MEVShieldIntegration.t.sol` 15, `MEVShieldHook.t.sol` 10, `SepoliaForkCurrentPoolQuote.t.sol` 4, `SepoliaForkV2Router.t.sol` 3, `SepoliaForkDeploymentAExecution.t.sol` 2, `SepoliaForkQuote.t.sol` 2, `SepoliaForkDeploymentVerification.t.sol` 1. `SepoliaForkSandwich.t.sol` is the eleventh file. The recorded offline total that includes it is the one in the summary.
 
-Running the backend and frontend suites gives 68 and 35 passing cases respectively. Neither suite reaches the network.
+The backend and frontend suites do not reach the network. Case counts in the tables further down were taken before `poolState.test.ts` and the extra frontend modules. The `test` script is the list that runs.
 
 ## Contracts: Forge
 
@@ -46,7 +46,7 @@ The compiler is pinned to `solc_version = "0.8.26"` and `evm_version = "cancun"`
 
 ### Gated fork suites
 
-All five fork suites are off by default. Each one calls `vm.skip(true)` in `setUp` unless its flag is set, so a plain `forge test` reports them as skipped rather than failing.
+All six fork suites are off by default. Each one calls `vm.skip(true)` in `setUp` unless its flag is set, so a plain `forge test` reports them as skipped rather than failing. The sandwich suite's command and the logged measurements are in [sepolia-fork-sandwich.md](../runbook/sepolia-fork-sandwich.md).
 
 | Flag | Suite | Extra requirements |
 | --- | --- | --- |
@@ -54,6 +54,7 @@ All five fork suites are off by default. Each one calls `vm.skip(true)` in `setU
 | `RUN_SEPOLIA_FORK_DEPLOYMENT_A_EXECUTION` | `SepoliaForkDeploymentAExecution.t.sol` | `SIGNER_PRIVATE_KEY`, and a pinned block is advisable |
 | `RUN_SEPOLIA_FORK_V2` | `SepoliaForkV2Router.t.sol` and `SepoliaForkCurrentPoolQuote.t.sol` | `--fork-url` |
 | `RUN_SEPOLIA_FORK_QUOTE` | `SepoliaForkQuote.t.sol` | `--fork-url`, optional amount overrides |
+| `RUN_SEPOLIA_FORK_SANDWICH` | `SepoliaForkSandwich.t.sol` | `--fork-url`. Optional `SEPOLIA_FORK_BLOCK_NUMBER` |
 
 Example:
 
@@ -87,7 +88,7 @@ npm ci
 npm test
 ```
 
-The script enumerates all ten test files explicitly ([backend/package.json](../../backend/package.json#L6)). A new test file must be added to that list or it will not run.
+The script enumerates all eleven test files explicitly ([backend/package.json](../../backend/package.json#L6)). A new test file must be added to that list or it will not run.
 
 | File | Cases | Covers |
 | --- | --- | --- |
@@ -97,6 +98,7 @@ The script enumerates all ten test files explicitly ([backend/package.json](../.
 | `policy/policyRequest.test.ts` | 7 | Schema acceptance for the configured pool, rejection of pool-key or chain overrides through unknown properties, unconfigured pool ids, missing or zero or malformed minimum output, zero and malformed amounts, expired and far-future expiries, out-of-range sqrt price |
 | `policy/policySigning.test.ts` | 3 | No signer invocation for a foreign pool, signing for the configured pool, and that `minAmountOut` is part of the digest |
 | `risk/riskEngine.test.ts` | 3 | Positive amounts, negative amounts, and zero |
+| `risk/poolState.test.ts` |  | The pool-state reader used by the price-impact score: slot layout, decoding, and a failed read. Added with the quote that replaced amount over 1000. The 102-pass backend total in the summary includes this file |
 | `risk/riskPreview.test.ts` | 5 | Request acceptance and rejection, zero amount, deterministic output for a valid amount, and that a negative amount gives the same absolute-based estimate |
 | `observability/requestCorrelation.test.ts` | 1 | Case-insensitive correlation and clearing |
 | `monitor/sepolia.test.ts` | 4 | Malformed optional router aborts before any RPC call, missing optional router still scans, wrong chain stops after `eth_chainId` only, and a correct chain issues `eth_getLogs` against the configured registry and hook with both topics |
@@ -119,7 +121,7 @@ npm ci
 npm test
 ```
 
-Four `.mjs` files, run with type stripping. They import the TypeScript modules directly, so the tested code is the same code the app bundles for those modules.
+Nine files, named in `frontend/package.json` and run with type stripping. They import the TypeScript modules directly, so the tested code is the same code the app bundles for those modules. Case counts are filled for the four files that were counted with the earlier total of 35. The five rows under those are part of the nine-file script.
 
 | File | Cases | Covers |
 | --- | --- | --- |
@@ -127,6 +129,11 @@ Four `.mjs` files, run with type stripping. They import the TypeScript modules d
 | `src/lib/apiValidation.test.mjs` | 5 | `/health` monitor parsing including a monitor that has not scanned yet, dropping a malformed monitor, and rejecting non-health bodies |
 | `src/lib/format.test.mjs` | 8 | `formatBaseUnits` rendering backend decimal strings at full precision, keeping an exact bound rather than truncating, and dashing missing or malformed values; symbol suffixing; the legacy truncating formatter; `shortAddress`; and `apiErrorMessage` reading a backend error string or falling back on a non-envelope body |
 | `src/config/policy.test.mjs` | 4 | `POLICY_TTL_SECONDS` stays below the mirrored `POLICY_MAX_TTL_SECONDS`, `buildPolicyExpiry` produces a future expiry inside the ceiling, a fractional clock reading floors correctly, and the derivation depends only on the supplied clock |
+| `src/lib/statusTone.test.mjs` |  | Activity and verification tones, including a mismatched address |
+| `src/lib/shieldReport.test.mjs` |  | Which shield phase wins when a receipt, a policy, and a preview are all present |
+| `src/lib/networkVerification.test.mjs` |  | A verification row can report a mismatch, and a row with no on-chain source stays Not checked |
+| `src/config/chainEnv.test.mjs` |  | Chain id, RPC, labels, demo mode, and local token addresses, including a missing local token variable |
+| `src/lib/minimumOutputVerification.test.mjs` |  | Sepolia stays flag-only, and chain 31337 can pass only when the deployment record matches every configured address |
 
 The readiness suite deliberately tests readiness as a pure function of its inputs. It constructs `available` quotes directly, which runtime code cannot produce, so it verifies the gate logic rather than the ability to obtain a quote.
 
