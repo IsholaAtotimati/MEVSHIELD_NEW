@@ -1,8 +1,20 @@
 import { z } from "zod";
 
-export const MIN_SQRT_PRICE_LIMIT_X96 = 4295128740n;
+/**
+ * Uniswap v4 `TickMath.MIN_SQRT_PRICE` and `MAX_SQRT_PRICE`, the values
+ * `getSqrtPriceAtTick(±887272)` returns.
+ *
+ * These are the exact bounds `MEVShieldRouter._validatePriceLimit` compares
+ * against, which rejects `limit <= MIN_SQRT_PRICE || limit >= MAX_SQRT_PRICE`.
+ * They were previously the *first* acceptable limit rather than the bounds, so
+ * a client sending `MIN_SQRT_PRICE + 1` (the closest legal limit, and what the
+ * frontend sends) was rejected here while the contract would have accepted it.
+ * Keep these equal to the contract's constants: the schema's job is to reject
+ * what the router rejects, no more.
+ */
+export const MIN_SQRT_PRICE_LIMIT_X96 = 4295128739n;
 export const MAX_SQRT_PRICE_LIMIT_X96 =
-  1461446703485210103287273052203988822378723970341n;
+  1461446703485210103287273052203988822378723970342n;
 export const POLICY_MAX_TTL_SECONDS = 30 * 60;
 
 const decimalIntPattern = /^-?\d{1,78}$/;

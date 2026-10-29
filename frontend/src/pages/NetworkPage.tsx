@@ -6,6 +6,11 @@ import Kicker from "../components/Kicker";
 import RiskCallout from "../components/RiskCallout";
 import StatLine from "../components/StatLine";
 import { CHAIN_NAME } from "../config/chain";
+import {
+  MINIMUM_OUTPUT_V2_DEPLOYMENT_UNVERIFIED_REASON,
+  MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
+  SEPOLIA_DEMO_MODE,
+} from "../config/env";
 import { useTrade } from "../context/TradeContext";
 import { CONTRACTS } from "../lib/contracts";
 import {
@@ -128,6 +133,26 @@ export default function NetworkPage() {
           </StatLine>
         </Card>
       </div>
+
+      <Card
+        title="Deployment verification"
+        footer="The signed-minimum-output v2 path is trusted when the build asserts it or, on the local chain only, when a compiled-in deployment record matches every configured address. Sepolia is flag-only and defaults to closed."
+      >
+        <StatLine
+          label="Minimum-output v2"
+          tone={MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED ? "gain" : undefined}
+        >
+          {MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED ? "verified" : "not verified"}
+        </StatLine>
+        {MINIMUM_OUTPUT_V2_DEPLOYMENT_UNVERIFIED_REASON && (
+          <p className="note">
+            {MINIMUM_OUTPUT_V2_DEPLOYMENT_UNVERIFIED_REASON}
+          </p>
+        )}
+        <StatLine label="Demo estimate">
+          {SEPOLIA_DEMO_MODE ? "on" : "off"}
+        </StatLine>
+      </Card>
 
       <Card title="Registry owner">
         <AddressRow name="Owner" address={deployment.registryOwner} />

@@ -16,6 +16,7 @@ import {
   resolveChainLabel,
   resolveChainName,
   resolveExplorerUrl,
+  resolveDemoMode,
   resolvePoolTokenAddresses,
   resolveRpcUrl,
 } from "./chainEnv.ts";
@@ -179,4 +180,76 @@ test("local overrides are trimmed and take precedence over Sepolia defaults", ()
   // The Sepolia values are never reachable on the local chain.
   assert.notEqual(resolved.addresses.token0, SEPOLIA_TOKEN0_ADDRESS);
   assert.notEqual(resolved.addresses.token1, SEPOLIA_TOKEN1_ADDRESS);
+});
+
+// ---------------------------------------------------------------------------
+// Demo-mode resolution
+// ---------------------------------------------------------------------------
+
+test("demo mode needs the flag on every chain", () => {
+  for (const flagValue of [undefined, "", "false", "TRUE", "1", " true!"]) {
+    assert.equal(
+      resolveDemoMode({
+        chainId: LOCAL_CHAIN_ID,
+        devBuild: true,
+        flagValue,
+      }),
+      false,
+      `flag ${JSON.stringify(flagValue)} must not enable demo mode`,
+    );
+  }
+});
+
+test("Sepolia demo mode still requires the dev server", () => {
+  assert.equal(
+    resolveDemoMode({
+      chainId: SEPOLIA_CHAIN_ID,
+      devBuild: true,
+      flagValue: "true",
+    }),
+    true,
+  );
+  // The property the production image relies on: a built Sepolia bundle can
+  // never reach the demo signing path, however the flag is set.
+  assert.equal(
+    resolveDemoMode({
+      chainId: SEPOLIA_CHAIN_ID,
+      devBuild: false,
+      flagValue: "true",
+    }),
+    false,
+  );
+});
+
+test("the local chain may enable demo mode from a built bundle", () => {
+  assert.equal(
+    resolveDemoMode({
+      chainId: LOCAL_CHAIN_ID,
+      devBuild: false,
+      flagValue: "true",
+    }),
+    true,
+  );
+});
+
+test("the local dev server keeps demo mode working as before", () => {
+  assert.equal(
+    resolveDemoMode({
+      chainId: LOCAL_CHAIN_ID,
+      devBuild: true,
+      flagValue: "true",
+    }),
+    true,
+  );
+});
+
+test("a chain that is neither Sepolia nor local follows the dev-server rule", () => {
+  assert.equal(
+    resolveDemoMode({ chainId: 8453, devBuild: false, flagValue: "true" }),
+    false,
+  );
+  assert.equal(
+    resolveDemoMode({ chainId: 8453, devBuild: true, flagValue: "true" }),
+    true,
+  );
 });

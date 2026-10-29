@@ -18,10 +18,19 @@ interface Window {
 interface ImportMetaEnv {
   /** Base URL for backend calls. Default `http://localhost:4000`. */
   readonly VITE_API_URL?: string;
-  /** Opt-in flag for Sepolia demo signing. Requires a dev server. */
+  /**
+   * Opt-in flag for the deterministic demo estimate path. Requires the Vite dev
+   * server on Sepolia; also allowed from a built bundle on the local chain.
+   */
   readonly VITE_SEPOLIA_DEMO_MODE?: string;
-  /** The single flag that opens the execution gate. Leave unset. */
+  /** The explicit deployment-verification assertion. Leave unset. */
   readonly VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED?: string;
+  /**
+   * Contents of the running local stack's `/deployments/local.json`, as a JSON
+   * string. Only consulted on chain 31337, and only when the flag above is not
+   * set. See `lib/minimumOutputVerification.ts`.
+   */
+  readonly VITE_LOCAL_DEPLOYMENT_RECORD?: string;
 
   /** Chain to read. Default `11155111`. Set to `31337` for the local stack. */
   readonly VITE_CHAIN_ID?: string;

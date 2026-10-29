@@ -35,6 +35,33 @@ export function readEnvValue(value: string | undefined): string | undefined {
 }
 
 /**
+ * Resolves whether the deterministic demo estimate path is enabled.
+ *
+ * Demo estimates replace a pool quote with a fixed conversion, and the policy
+ * they sign carries a 1-base-unit minimum output, which is not slippage
+ * protection. That is only defensible where the app also deployed the pool:
+ *
+ *  - `VITE_SEPOLIA_DEMO_MODE` must be the literal `"true"`.
+ *  - On Sepolia the build must be the Vite dev server (`import.meta.env.DEV`),
+ *    so a production bundle can never sign a demo policy. This is unchanged.
+ *  - On the local anvil chain a production bundle is allowed, because there is
+ *    no other way to serve the local stack and the chain is this machine's own
+ *    anvil. The demo rate then applies to mock tokens worth nothing.
+ *
+ * The chain check is on the resolved chain id, so a build that does not
+ * explicitly select 31337 stays on the Sepolia rule.
+ */
+export function resolveDemoMode(input: {
+  chainId: number;
+  devBuild: boolean;
+  flagValue: string | undefined;
+}): boolean {
+  if (readEnvValue(input.flagValue) !== "true") return false;
+  if (input.devBuild) return true;
+  return input.chainId === LOCAL_CHAIN_ID;
+}
+
+/**
  * Parses a chain id.
  *
  * Accepts decimal digits only. A hex string, a negative number, a float or
