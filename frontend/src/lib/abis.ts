@@ -137,6 +137,28 @@ export const mevShieldRouterAbi = [
     inputs: [],
   },
   {
+    type: "error",
+    name: "InvalidPriceLimit",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "PriceLimitTooFar",
+    inputs: [
+      { name: "currentTick", type: "int24" },
+      { name: "limitTick", type: "int24" },
+      { name: "maxDistance", type: "uint24" },
+    ],
+  },
+  {
+    type: "error",
+    name: "MinimumOutputNotMet",
+    inputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "minAmountOut", type: "uint256" },
+    ],
+  },
+  {
     type: "function",
     name: "executeSwap",
     stateMutability: "payable",

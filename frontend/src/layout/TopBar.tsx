@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { formatGwei } from "viem";
 
 import Button from "../components/Button";
-import { CHAIN_LABEL, CHAIN_NAME } from "../config/chain";
+import { BUILT_CHAIN_MARKER, CHAIN_ID, CHAIN_LABEL, CHAIN_NAME } from "../config/chain";
 import { shortAddress } from "../lib/format";
+import { showsAnvilAccountButton } from "../lib/walletConnect";
 import { publicClient } from "../lib/viem";
 import { useTrade } from "../context/TradeContext";
 
@@ -46,6 +47,19 @@ export default function TopBar() {
         >
           {wallet.account ? shortAddress(wallet.account) : "Connect wallet"}
         </Button>
+        {showsAnvilAccountButton(CHAIN_ID, wallet.account !== null) && (
+          <Button variant="ghost" onClick={() => void wallet.connectAnvil()}>
+            Use anvil account
+          </Button>
+        )}
+        {wallet.account && (
+          <Button variant="ghost" onClick={wallet.disconnectWallet}>
+            Disconnect
+          </Button>
+        )}
+        <span className="top-bar-warning" role="status">
+          {wallet.walletStatus}
+        </span>
         {wallet.wrongNetwork && (
           <span className="top-bar-warning">
             Wrong network. Switch to {CHAIN_NAME}.
@@ -53,7 +67,9 @@ export default function TopBar() {
         )}
       </div>
       <div className="top-bar-group">
-        <span className="network-tag mono">{CHAIN_LABEL}</span>
+        <span className="network-tag mono" data-built-chain={BUILT_CHAIN_MARKER}>
+          {CHAIN_LABEL}
+        </span>
         <span className="mono">Gas estimate: {gasPrice} gwei</span>
         <span
           className={`backend-status backend-status--${backend.healthState}`}

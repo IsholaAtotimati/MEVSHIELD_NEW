@@ -10,7 +10,6 @@ import { TOKEN_NETWORK_LABEL } from "../config/chain";
 import Button from "../components/Button";
 import Delta from "../components/Delta";
 import ExplorerLink from "../components/ExplorerLink";
-import KeptBox from "../components/KeptBox";
 import Kicker from "../components/Kicker";
 import MiniPair from "../components/MiniPair";
 import PolicyBox from "../components/PolicyBox";
@@ -25,11 +24,7 @@ import {
   DEMO_MIN_AMOUNT_OUT,
   DEMO_USDC_PER_WETH,
 } from "../lib/protectedQuote";
-import {
-  formatBaseUnits,
-  formatBaseUnitsWithSymbol,
-  shortAddress,
-} from "../lib/format";
+import { formatBaseUnits, shortAddress } from "../lib/format";
 import { resolveShieldPhase } from "../lib/shieldReport";
 import { EXPLORER_NAME, explorerTxUrl } from "../lib/explorer";
 
@@ -247,40 +242,45 @@ export default function TradePage() {
 
         <div className="actions">
           <Button
-            variant="primary"
+            variant={primaryStep === "done" ? "ghost" : "primary"}
             wide
-            disabled={primaryDisabled}
+            disabled={primaryDisabled || primaryStep === "done"}
             onClick={() => void onPrimaryClick()}
           >
-            {primaryStep === "check"
-              ? policy.isPreviewingRisk
-                ? "Checking protection..."
-                : "Check protection"
-              : policy.isCreatingPolicy
-                ? "Signing policy..."
-                : "Sign policy and swap"}
+            {primaryStep === "done"
+              ? "Policy signed"
+              : primaryStep === "check"
+                ? policy.isPreviewingRisk
+                  ? "Checking protection..."
+                  : "Check protection"
+                : policy.isCreatingPolicy
+                  ? "Signing policy..."
+                  : "Sign policy and swap"}
           </Button>
           {policy.policy?.registered && (
             <Button
-              variant="primary"
+              variant={lifecycleExecuted ? "ghost" : "primary"}
               wide
               disabled={
+                lifecycleExecuted ||
                 !swapReadiness.canExecute ||
                 execution.isExecuting ||
                 policy.isCreatingPolicy
               }
               onClick={() => void execution.executeProtectedSwap()}
             >
-              {execution.isExecuting
-                ? "Executing..."
-                : SEPOLIA_DEMO_MODE
-                  ? "Execute demo swap (gate may block)"
-                  : "Execute protected swap"}
+              {lifecycleExecuted
+                ? "Swap executed"
+                : execution.isExecuting
+                  ? "Executing..."
+                  : SEPOLIA_DEMO_MODE
+                    ? "Execute demo swap"
+                    : "Execute protected swap"}
             </Button>
           )}
         </div>
 
-        {checklist.length > 0 && (
+        {primaryStep !== "done" && checklist.length > 0 && (
           <div className="callout-slot" aria-live="polite">
             <RiskCallout heading="Still needed before signing">
               <ul>
@@ -371,7 +371,7 @@ export default function TradePage() {
           </>
         )}
 
-        {(phase === "risk" || policy.policy) && (
+        {phase === "risk" && !policy.policy && (
           <PolicyBox title="What signing will lock">
             <StatLine label="slippageBps" mono>
               {slippageBps}
@@ -437,16 +437,6 @@ export default function TradePage() {
 
         {phase === "receipt" && execution.execution && policy.policy && (
           <>
-            <KeptBox
-              label="Signed minimum output"
-              value={formatBaseUnitsWithSymbol(
-                policy.policy.policy.minAmountOut,
-                SWAP_TOKENS[outputToken].decimals,
-                SWAP_TOKENS[outputToken].poolSymbol,
-              )}
-              detail={shortAddress(execution.execution.txHash)}
-              note="The floor the registered policy guaranteed. Compare it with the balance that actually arrived in the wallet. Sepolia test tokens, so no USD value is shown."
-            />
             <StatLine label="Policy status" tone="gain">
               registered and executed
             </StatLine>

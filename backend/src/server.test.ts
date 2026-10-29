@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { once } from "node:events";
 import test from "node:test";
 import { Wallet } from "ethers";
@@ -418,6 +419,13 @@ test("unknown routes answer with the typed 404 body", async () => {
   assert.equal(response.status, 404);
   assert.equal(response.json.code, "not_found");
   assert.match(String(response.json.error), /No route for GET \/no-such-route/);
+});
+
+test("the backend test script keeps the local-chain wallet file", () => {
+  const pkg = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { scripts: { test: string } };
+  assert.match(pkg.scripts.test, /src\/localChainWallet\.test\.ts/);
 });
 
 test("successful responses keep their existing body shape", async () => {

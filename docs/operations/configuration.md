@@ -15,9 +15,9 @@ Read in [frontend/src/config/env.ts](../../frontend/src/config/env.ts), [fronten
 | Name | Required | Default | Purpose | Safety note |
 | --- | --- | --- | --- | --- |
 | `VITE_API_URL` | optional | `http://localhost:4000` | Base URL for every backend call | Public. Must be reachable from the browser and allowed by the backend CORS origin. In demo mode a non-local URL forces `backendPoolKeyVerified` to false |
-| `VITE_SEPOLIA_DEMO_MODE` | optional | unset, treated as false | Requests demo mode | Only takes effect when `import.meta.env.DEV` is also true, so a production build cannot enable it. Demo mode signs a 1-base-unit minimum output, which is not slippage protection |
+| `VITE_SEPOLIA_DEMO_MODE` | optional | unset, treated as false | Requests demo mode | On Sepolia it also requires the Vite dev server, so a production Sepolia bundle cannot enable it. On chain 31337 a built bundle may enable it. Demo mode signs a 1-base-unit minimum output, which is not slippage protection |
 | `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` | optional | unset, treated as false | Opens the readiness gate for signing and execution | Setting this to true is the single action that enables execution in the UI. It should only be set after a live-stack fork test passes. See [ADR 0005](../decisions/0005-execute-gate-stays-closed.md) |
-| `VITE_CHAIN_ID` | optional | `11155111` | Chain the client reads and asks the wallet to switch to | Only decimal digits are accepted. A malformed value falls back to Sepolia rather than becoming the local chain. Set to `31337` for the local stack |
+| `VITE_CHAIN_ID` | optional | `11155111` | Chain the client reads and asks the wallet to switch to | Only decimal digits are accepted. A malformed value falls back to Sepolia rather than becoming the local chain. Set to `31337` for the local stack. Unset is Sepolia, not anvil. Chain id `1` is not anvil. A bare `npm run build` while `mevshield-local-test-frontend` is running is refused unless this is `31337`, because that container serves `frontend/dist` live |
 | `VITE_RPC_URL` | optional | public Sepolia RPC, or `http://localhost:8545` on the local chain | Read RPC endpoint | Unauthenticated and inlined into the bundle, so never put a provider key here |
 | `VITE_EXPLORER_URL` | optional | `https://sepolia.etherscan.io`, none locally | Block explorer base | A local chain has no explorer unless one is configured |
 | `VITE_TOKEN0_ADDRESS` | required when `VITE_CHAIN_ID=31337`, optional on Sepolia | Sepolia WETH9 `0xfff9…6b14` | First pool token | **No local default.** See the note below |
@@ -163,7 +163,8 @@ The most consequential combinations:
 | `MEVSHIELD_V2_POLICY_ENABLED` unset | `POST /policy` answers 503 to everything. Signing is unavailable |
 | `MEVSHIELD_V2_POLICY_ENABLED=true` without `SIGNER_PRIVATE_KEY` | Startup throws, because the signer is required when signing is enabled |
 | `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true` with `NODE_ENV=production` | Demo mode is refused. The flag has no effect |
-| `VITE_SEPOLIA_DEMO_MODE=true` in a production build | Demo mode is refused, because `import.meta.env.DEV` is false |
+| `VITE_SEPOLIA_DEMO_MODE=true` in a production Sepolia build | Demo mode stays off, because `import.meta.env.DEV` is false. On chain `31337` the same flag is allowed in a built bundle |
+| `npm run build` in `frontend/` while `mevshield-local-test-frontend` is running, without `VITE_CHAIN_ID=31337` | The build exits before it writes `frontend/dist`. Letting it finish would replace the Anvil page with Sepolia, and Connect wallet would ask for a browser extension |
 | Any `PROTECTED_POOL_*` different from the pin | Startup throws with a message naming the approved pool |
 | `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` unset or false | The UI cannot sign or execute |
 | `VITE_CHAIN_ID=31337` without `VITE_TOKEN0_ADDRESS` / `VITE_TOKEN1_ADDRESS` | The UI reports an unconfigured pool naming the missing variables, and cannot sign or execute. Nothing falls back to a guessed address |

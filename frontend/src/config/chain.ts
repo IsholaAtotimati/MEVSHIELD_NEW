@@ -42,6 +42,13 @@ export const CHAIN_NAME = resolveChainName(CHAIN_ID);
 
 export const CHAIN_LABEL = resolveChainLabel(CHAIN_ID);
 
+/**
+ * One literal baked by `vite.config.ts` from the raw `VITE_CHAIN_ID`.
+ * `unset` means this bundle took the Sepolia default. The local-test script
+ * refuses to publish anything except `mevshield-built-chain:31337`.
+ */
+export const BUILT_CHAIN_MARKER: string = __MEVSHIELD_BUILT_CHAIN_MARKER__;
+
 /** Block explorer base for address and transaction links, when one exists. */
 export const EXPLORER_BASE_URL = resolveExplorerUrl(
   import.meta.env.VITE_EXPLORER_URL,

@@ -292,8 +292,12 @@ fi
 [ -d "$REPO_ROOT/frontend/node_modules" ] || fail "frontend/node_modules is missing. Run: (cd frontend && npm ci)"
 
 log "Building the frontend for chain 31337"
-(cd "$REPO_ROOT/frontend" && npm run build >/dev/null) || fail "The frontend build failed."
+# Do not hide this output. A bare `npm run build` with no VITE_CHAIN_ID compiles
+# Sepolia into frontend/dist, and this container serves that directory live.
+(cd "$REPO_ROOT/frontend" && npm run build) || fail "The frontend build failed."
 DIST_DIR="$REPO_ROOT/frontend/dist"
+node "$REPO_ROOT/frontend/scripts/assertBuiltChain.mjs" "$DIST_DIR" 31337 \
+  || fail "The frontend bundle is not chain 31337. Refusing to serve it."
 
 # A static server cannot set the app's env, so every value above is baked into
 # the bundle at build time. nginx needs one thing the build does not carry: the

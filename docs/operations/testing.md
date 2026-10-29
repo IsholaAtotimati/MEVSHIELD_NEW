@@ -9,8 +9,8 @@ CI runs all three: a Foundry job, a frontend job and a backend job ([.github/wor
 | Suite | Command | Location | On this branch | Needs network |
 | --- | --- | --- | --- | --- |
 | Contracts | `forge test` | `test/*.t.sol` | 11 files. Six fork suites skip unless their flag is set. [The sandwich runbook](../runbook/sepolia-fork-sandwich.md) records `forge test --offline` as 88 passed, 6 skipped, 94 total | No, except the gated fork suites |
-| Backend | `npm test` in `backend` | The files named in `backend/package.json` | 11 files, including `risk/poolState.test.ts`. The same runbook records 102 passed | No |
-| Frontend | `npm test` in `frontend` | The files named in `frontend/package.json` | 9 files, listed in the frontend section below | No |
+| Backend | `npm test` in `backend` | The files named in `backend/package.json` | 12 files, including `risk/poolState.test.ts` and `localChainWallet.test.ts`. The sandwich runbook records an older 102-pass total | No |
+| Frontend | `npm test` in `frontend` | The files named in `frontend/package.json` | 12 files, listed in the frontend section below | No |
 
 The Forge total counts `test_` functions only; fork suites that skip in `setUp` are included in the count because the function still exists. A plain `forge test` skips every gated fork file, including `SepoliaForkSandwich.t.sol`, because the skip happens in `setUp` before any test function runs.
 
@@ -88,7 +88,7 @@ npm ci
 npm test
 ```
 
-The script enumerates all eleven test files explicitly ([backend/package.json](../../backend/package.json#L6)). A new test file must be added to that list or it will not run.
+The script enumerates test files explicitly ([backend/package.json](../../backend/package.json#L6)). A new test file must be added to that list or it will not run. `server.test.ts` asserts that `src/localChainWallet.test.ts` stays on that list.
 
 | File | Cases | Covers |
 | --- | --- | --- |
@@ -102,7 +102,8 @@ The script enumerates all eleven test files explicitly ([backend/package.json](.
 | `risk/riskPreview.test.ts` | 5 | Request acceptance and rejection, zero amount, deterministic output for a valid amount, and that a negative amount gives the same absolute-based estimate |
 | `observability/requestCorrelation.test.ts` | 1 | Case-insensitive correlation and clearing |
 | `monitor/sepolia.test.ts` | 4 | Malformed optional router aborts before any RPC call, missing optional router still scans, wrong chain stops after `eth_chainId` only, and a correct chain issues `eth_getLogs` against the configured registry and hook with both topics |
-| `server.test.ts` | 13 | `/health` exposes the monitor block, `/risk-preview` metadata, the 503 gate with and without a body, invalid JSON produces 400, validation runs before signing, `minAmountOut` of 1 is rejected outside demo, an out-of-range sqrt price is rejected before signing, error bodies carry a stable code and request id, validation errors keep the `error` string and add `details` plus `code`, invalid JSON uses `invalid_json` without leaking details, unknown routes answer with the typed 404 body, and successful bodies keep their existing shape |
+| `server.test.ts` | 14 | `/health` exposes the monitor block, `/risk-preview` metadata, the 503 gate with and without a body, invalid JSON produces 400, validation runs before signing, `minAmountOut` of 1 is rejected outside demo, an out-of-range sqrt price is rejected before signing, error bodies carry a stable code and request id, validation errors keep the `error` string and add `details` plus `code`, invalid JSON uses `invalid_json` without leaking details, unknown routes answer with the typed 404 body, the test script still names `localChainWallet.test.ts`, and successful bodies keep their existing shape |
+| `localChainWallet.test.ts` | 10 | The local-test backend env is chain 31337 and rejects chain `1`, Sepolia, blank, and malformed ids. `/health` and `/config/protected-pool` advertise 31337 and `localDemoMode`. A demo policy signature verifies on chain 31337 and not on 11155111 or 1. The body cannot carry a `chainId`. The anvil account is not the policy trader. A Sepolia app does not sign the local pool. The local test origin is the CORS allow-list, and the published frontend origin is not. The test script must keep naming this file |
 
 The monitor tests spawn a child process with a stub JSON-RPC server rather than mocking the module, so they exercise the real provider path ([backend/src/monitor/sepolia.test.ts:8](../../backend/src/monitor/sepolia.test.ts#L8)).
 
@@ -121,7 +122,7 @@ npm ci
 npm test
 ```
 
-Nine files, named in `frontend/package.json` and run with type stripping. They import the TypeScript modules directly, so the tested code is the same code the app bundles for those modules. Case counts are filled for the four files that were counted with the earlier total of 35. The five rows under those are part of the nine-file script.
+The files named in `frontend/package.json`, run with type stripping. They import the TypeScript modules directly, so the tested code is the same code the app bundles for those modules. Case counts below are filled where they were counted. `scripts/localAnvilBundle.test.mjs` is plain JavaScript and reads the shell script and `package.json`; it does not import the app.
 
 | File | Cases | Covers |
 | --- | --- | --- |
@@ -134,6 +135,8 @@ Nine files, named in `frontend/package.json` and run with type stripping. They i
 | `src/lib/networkVerification.test.mjs` |  | A verification row can report a mismatch, and a row with no on-chain source stays Not checked |
 | `src/config/chainEnv.test.mjs` |  | Chain id, RPC, labels, demo mode, and local token addresses, including a missing local token variable |
 | `src/lib/minimumOutputVerification.test.mjs` |  | Sepolia stays flag-only, and chain 31337 can pass only when the deployment record matches every configured address |
+| `src/lib/walletConnect.test.mjs` | 11 | Connect wallet on chain 31337 with no extension uses the anvil account. The same click on Sepolia, on chain `1`, and on a blank or malformed chain id refuses and asks for a browser wallet. An injected provider is never replaced by the anvil key. The anvil button is local-only and hides once connected. The published anvil key is account `#0` |
+| `scripts/localAnvilBundle.test.mjs` | 7 | The bundle marker is `mevshield-built-chain:31337` only when `VITE_CHAIN_ID` is that decimal. Unset, Sepolia, chain `1`, and a malformed value are rejected. A running `mevshield-local-test-frontend` container blocks every build that is not 31337. `package.json` still runs the guard and these tests. `local-test-flow.sh` exports 31337 before `npm run build`, does not hide that build's output, and checks the marker before nginx starts |
 
 The readiness suite deliberately tests readiness as a pure function of its inputs. It constructs `available` quotes directly, which runtime code cannot produce, so it verifies the gate logic rather than the ability to obtain a quote.
 
@@ -141,7 +144,7 @@ The readiness suite deliberately tests readiness as a pure function of its input
 
 Coverage gaps that matter:
 
-- No test for `usePolicy`, `useExecution`, `useProtocol`, `useWallet`, `useTokenBalance`, `useActivityFeed` or `useBackendHealth`.
+- No component test for `usePolicy`, `useExecution`, `useProtocol`, `useWallet`, `useTokenBalance`, `useActivityFeed` or `useBackendHealth`. The wallet decision those hooks follow is covered by `src/lib/walletConnect.test.mjs`. The hook still has no DOM test.
 - No test for `policyMatch`, `telemetry`, `activityStorage`, `policyDefaults` or `observability`.
 - No test binds `POLICY_MAX_TTL_SECONDS` in the frontend to the backend constant. The two values are kept in step by review, and only the frontend copy is asserted.
 - No component tests and no DOM tests.

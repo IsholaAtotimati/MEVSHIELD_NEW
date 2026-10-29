@@ -4,13 +4,12 @@ import { encodeAbiParameters } from "viem";
 
 import { SEPOLIA_DEMO_MODE } from "../config/env";
 import {
-  MIN_SQRT_PRICE_LIMIT_X96,
-  MAX_SQRT_PRICE_LIMIT_X96,
   SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
 } from "../config/swapPool";
 import { CONTRACTS } from "../lib/contracts";
+import { shortChainError } from "../lib/routerLimit";
 import { erc20Abi, mevShieldRouterAbi } from "../lib/abis";
 import {
   calculateMinimumOutput,
@@ -92,9 +91,7 @@ export function useExecution(args: UseExecutionArgs) {
     const amountBaseUnits = inputAmountBaseUnits;
     const amountSpecified =
       amountBaseUnits === null ? null : -amountBaseUnits;
-    const sqrtPriceLimitX96 = (
-      zeroForOne ? MIN_SQRT_PRICE_LIMIT_X96 : MAX_SQRT_PRICE_LIMIT_X96
-    ).toString();
+    const sqrtPriceLimitX96 = policy.policy.sqrtPriceLimitX96;
 
     logFrontend("protected_swap_execution_started", {
       requestId,
@@ -333,9 +330,7 @@ export function useExecution(args: UseExecutionArgs) {
         error,
         nonce: policy.policy.nonce,
       });
-      setActionStatus(
-        error instanceof Error ? error.message : "Protected swap failed.",
-      );
+      setActionStatus(shortChainError(error, "Protected swap failed."));
     } finally {
       setIsExecuting(false);
     }

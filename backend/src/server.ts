@@ -88,13 +88,37 @@ export function loadAppDependencies(
   };
 }
 
+/**
+ * localhost and 127.0.0.1 are different browser origins. A page opened as
+ * http://127.0.0.1:5402 cannot call an API that only allows http://localhost:5402.
+ */
+export function allowedFrontendOrigins(frontendUrl: string): string[] {
+  const origins = new Set([frontendUrl]);
+  try {
+    const url = new URL(frontendUrl);
+    if (url.hostname === "localhost") {
+      url.hostname = "127.0.0.1";
+      origins.add(url.origin);
+    } else if (url.hostname === "127.0.0.1") {
+      url.hostname = "localhost";
+      origins.add(url.origin);
+    }
+  } catch {
+    return [frontendUrl];
+  }
+  return [...origins];
+}
+
 export function createApp(deps: AppDependencies): Express {
   const app = express();
   const frontendUrl = deps.frontendUrl ?? "http://localhost:5173";
 
   app.use(requestIdMiddleware);
   app.use(httpLifecycleMiddleware);
-  app.use(cors({ origin: frontendUrl, exposedHeaders: ["x-request-id"] }));
+  app.use(cors({
+    origin: allowedFrontendOrigins(frontendUrl),
+    exposedHeaders: ["x-request-id"],
+  }));
   app.use(express.json());
 
   const TransactionEventSchema = z.object({

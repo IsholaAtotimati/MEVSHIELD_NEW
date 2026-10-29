@@ -8,8 +8,6 @@ import {
 } from "../config/env";
 import { buildPolicyExpiry } from "../config/policy";
 import {
-  MIN_SQRT_PRICE_LIMIT_X96,
-  MAX_SQRT_PRICE_LIMIT_X96,
   SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
@@ -18,6 +16,7 @@ import { parsePolicyResponseBody, parseRiskPreviewBody, apiErrorMessage } from "
 import { CONTRACTS } from "../lib/contracts";
 import { policyAuthorizationAbi, policyRegistryAbi } from "../lib/abis";
 import { shortAddress } from "../lib/format";
+import { routerSqrtPriceLimit, shortChainError } from "../lib/routerLimit";
 import {
   calculateMinimumOutput,
   calculatePoolId,
@@ -230,9 +229,7 @@ export function usePolicy(args: UsePolicyArgs) {
     const amountBaseUnits = inputAmountBaseUnits;
     const amountSpecified =
       amountBaseUnits === null ? null : -amountBaseUnits;
-    const sqrtPriceLimitX96 = (
-      zeroForOne ? MIN_SQRT_PRICE_LIMIT_X96 : MAX_SQRT_PRICE_LIMIT_X96
-    ).toString();
+    const sqrtPriceLimitX96 = await routerSqrtPriceLimit(poolId, zeroForOne);
 
     logFrontend("swap_started", {
       requestId,
@@ -467,9 +464,7 @@ export function usePolicy(args: UsePolicyArgs) {
         txHash: registrationTxHash,
         error,
       });
-      setActionStatus(
-        error instanceof Error ? error.message : "Could not create policy.",
-      );
+      setActionStatus(shortChainError(error, "Could not create policy."));
     } finally {
       setIsCreatingPolicy(false);
     }

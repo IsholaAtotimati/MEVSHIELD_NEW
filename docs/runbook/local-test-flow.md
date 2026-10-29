@@ -211,9 +211,12 @@ With the stack up and the script run:
 
 1. Open <http://localhost:5599>. The top bar reads `Anvil Local · 31337` and
    `Backend online`, and an amber strip says demo mode is on.
-2. Optionally connect a wallet. Account #0 and its key are printed by the
-   script; add `http://localhost:<anvil port>` with chain id `31337` to your
-   wallet first.
+2. Connect a wallet, or don't. With no browser extension, **Connect wallet**
+   and **Use anvil account** both use anvil account #0. That button exists
+   only on a chain `31337` bundle. The top bar must read `Anvil Local · 31337`.
+   If it reads `Sepolia · 11155111`, the bundle was rebuilt without
+   `VITE_CHAIN_ID` and the page is not this flow. Re-run the script. Do not
+   fix it by running `npm run build` in `frontend/`.
 3. Type a positive amount, e.g. `0.5`. The receive field fills with the demo
    estimate.
 4. The checklist loses the amount reason, the quote reason and the
@@ -248,6 +251,7 @@ runbook. Registration is the end of the flow this runbook claims.
 | Checklist says *"The signed-minimum-output v2 contracts are not deployed and verified"* | Chain is not 31337, or the record does not match the configured addresses | Read `MINIMUM_OUTPUT_V2_DEPLOYMENT_UNVERIFIED_REASON` on the Network page; it names the mismatched field |
 | Checklist says *"The backend pool-key configuration is unverified"* | Frontend and backend disagree about the pool, or CORS blocked the fetch | Compare `GET /config/protected-pool` with the record; check `FRONTEND_URL` |
 | **Check protection** stays disabled with a valid amount | One of gates 1–6 above is shut | The checklist names it. There is no silent failure |
+| Top bar says **Sepolia · 11155111**, or Connect wallet says **Install a browser wallet** | `frontend/dist` was rebuilt with `VITE_CHAIN_ID` unset. That default is Sepolia (`11155111`). Chain id `1` is not anvil either. The nginx container serves `frontend/dist` live, so the open page changes immediately and **Use anvil account** disappears | Re-run `./script/local-test-flow.sh`. Do not run `npm run build` in `frontend/` while `mevshield-local-test-frontend` is up. The build script refuses that overwrite. After a build the script also refuses to publish a bundle whose marker is not `mevshield-built-chain:31337` |
 | Top bar warns **Wrong network** | The wallet is on a different chain | Switch the wallet to chain id `31337` |
 | **Sign policy and swap** fails with *Invalid request* | Backend rejected the body — historically a `sqrtPriceLimitX96` bound mismatch | Check the backend log for `policy_request_failed` and the field it names |
 | **Sign policy and swap** fails with *Policy registration transaction failed* | The on-chain call reverted, usually `Unauthorized()` from the registry | Check the registry's `authorizedRegistrar`; see gate 6 and section 6 |

@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+/** Set in `vite.config.ts` from the raw `VITE_CHAIN_ID` at build time. */
+declare const __MEVSHIELD_BUILT_CHAIN_MARKER__: string;
+
 interface Window {
   ethereum?: {
     request: (args: {

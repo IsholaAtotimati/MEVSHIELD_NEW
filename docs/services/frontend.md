@@ -160,11 +160,13 @@ Six contract rows from `buildVerificationRows`, an authorized-signer row, backen
 
 ## Wallet interaction
 
-`getWalletClient` requires `window.ethereum` and throws a readable error otherwise ([frontend/src/lib/viem.ts:17](../../frontend/src/lib/viem.ts#L17)). There is no WalletConnect or other connector.
+Connect wallet goes through `planConnectWallet` in [frontend/src/lib/walletConnect.ts](../../frontend/src/lib/walletConnect.ts). On chain 31337, with no injected provider, it uses anvil account `#0`. On any other chain, including Sepolia (`11155111`) and chain id `1`, the same click refuses with `Install a browser wallet, then click Connect wallet again.` An injected provider is used as itself on every chain. The anvil key is never substituted for a browser wallet. **Use anvil account** is rendered only for chain 31337 while nothing is connected ([frontend/src/layout/TopBar.tsx](../../frontend/src/layout/TopBar.tsx)).
 
-`ensureSepolia` switches the chain when the wallet is on another network ([frontend/src/hooks/useWallet.ts:34](../../frontend/src/hooks/useWallet.ts#L34)). It is called before registration and before execution.
+`getWalletClient` returns that anvil signer when one is active, and otherwise requires `window.ethereum` ([frontend/src/lib/viem.ts](../../frontend/src/lib/viem.ts)). There is no WalletConnect or other connector.
 
-The public client takes its chain and transport from `frontend/src/config/chain.ts`. The default RPC is the public Sepolia endpoint. `VITE_CHAIN_ID` and `VITE_RPC_URL` override it at build time, and an empty environment stays on Sepolia. There is no fallback transport.
+`ensureSepolia` switches the wallet to the chain this bundle was built for ([frontend/src/hooks/useWallet.ts](../../frontend/src/hooks/useWallet.ts)). The name is historical. On a local bundle that chain is 31337. It is called before registration and before execution.
+
+The public client takes its chain and transport from `frontend/src/config/chain.ts`. The default RPC is the public Sepolia endpoint. `VITE_CHAIN_ID` and `VITE_RPC_URL` override it at build time, and an empty environment stays on Sepolia. There is no fallback transport. The bundle also contains one literal, `mevshield-built-chain:<id>`, from the raw `VITE_CHAIN_ID`. `unset` means the Sepolia default. `./script/local-test-flow.sh` will not publish a bundle unless that literal is `mevshield-built-chain:31337`.
 
 ## Telemetry
 
@@ -191,7 +193,7 @@ npm run dev     # vite
 npm run demo    # vite --mode demo
 npm test        # the files named in frontend/package.json
 npm run lint    # oxlint
-npm run build   # tsc -b && vite build
+npm run build   # refuses to overwrite a live anvil dist, then tsc -b && vite build
 ```
 
 `npm run demo` runs Vite in the `demo` mode. Demo mode still requires `VITE_SEPOLIA_DEMO_MODE=true`. On Sepolia it also requires the Vite dev server, so a production Sepolia bundle stays off that path. On chain 31337 a production bundle may use the deterministic estimate. See `resolveDemoMode` in `frontend/src/config/chainEnv.ts`.

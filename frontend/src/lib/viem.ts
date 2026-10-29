@@ -4,8 +4,28 @@ import {
   custom,
   http,
 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 import { CHAIN, RPC_URL } from "../config/chain";
+import {
+  ANVIL_ACCOUNT_KEY,
+  injectedWalletMissingMessage,
+  planConnectAnvil,
+} from "./walletConnect";
+
+type AppWalletClient = ReturnType<typeof createInjectedWallet>;
+
+let localAnvilClient: AppWalletClient | null = null;
+
+function createInjectedWallet() {
+  if (!window.ethereum) {
+    throw new Error(injectedWalletMissingMessage(CHAIN.id));
+  }
+  return createWalletClient({
+    chain: CHAIN,
+    transport: custom(window.ethereum),
+  });
+}
 
 /**
  * Read client. The chain and transport come from `config/chain.ts`, which
@@ -17,15 +37,27 @@ export const publicClient = createPublicClient({
   transport: http(RPC_URL),
 });
 
-export function getWalletClient() {
-  if (!window.ethereum) {
-    throw new Error(
-      "MetaMask or another injected wallet is required.",
-    );
+/** Sign with anvil account #0. No browser extension required. Local chain only. */
+export function connectLocalAnvilAccount() {
+  const plan = planConnectAnvil(CHAIN.id);
+  if (plan.kind === "refuse") {
+    throw new Error(plan.message);
   }
-
-  return createWalletClient({
+  const account = privateKeyToAccount(ANVIL_ACCOUNT_KEY);
+  localAnvilClient = createWalletClient({
+    account,
     chain: CHAIN,
-    transport: custom(window.ethereum),
-  });
+    transport: http(RPC_URL),
+  }) as unknown as AppWalletClient;
+  return account.address;
+}
+
+/** Drop the anvil signer so the next connect can use a browser wallet again. */
+export function disconnectLocalAnvilAccount() {
+  localAnvilClient = null;
+}
+
+export function getWalletClient(): AppWalletClient {
+  if (localAnvilClient) return localAnvilClient;
+  return createInjectedWallet();
 }
