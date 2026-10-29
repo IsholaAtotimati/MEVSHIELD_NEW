@@ -1,6 +1,6 @@
 # Sepolia fork: price move, then minimum output
 
-This runbook records one local fork demonstration and the pool-state risk estimate that replaced `amount / 1000`. No transaction is broadcast. No private key for the live Sepolia signer is used. No faucet is requested.
+This runbook records local fork demonstrations and the pool-state risk estimate that replaced `amount / 1000`. No transaction is broadcast. No private key for the live Sepolia signer is used. No faucet is requested. An unpinned fork can move; the tables below are the runs that were logged, not a permanent pool state.
 
 ## What the test does
 
@@ -46,9 +46,11 @@ Without `RUN_SEPOLIA_FORK_SANDWICH=true` the test skips, including in `forge tes
 
 The run below did not set `SEPOLIA_FORK_BLOCK_NUMBER`. Foundry forked the latest block, and the test logged it.
 
-Fork block: **12018873**
+Fork block logged by the first run below: **12018873**
 
-To repeat that block:
+That block is the head the unpinned command happened to fork, not a pin. An unpinned fork follows the chain head, so a later run can log a different block. If the pool's price or active liquidity has changed, the tick and output numbers can change too. The test logs the block it used. It does not assert the tables below.
+
+To repeat the first run's block:
 
 ```bash
 RUN_SEPOLIA_FORK_SANDWICH=true SEPOLIA_FORK_BLOCK_NUMBER=12018873 \
@@ -77,6 +79,21 @@ Logged by `console.log` at `-vv`:
 | Active liquidity after the attacker | 1541399567004 |
 
 The unprotected victim received 9,042,742,080 wei less WETH than the pre-attack quote. The protected swap used that pre-attack quote as `minAmountOut` and reverted `MinimumOutputNotMet`.
+
+### Later unpinned run
+
+The same unpinned command was run again on 29 October 2026. The block had moved. The tick, output, revert, and liquidity figures matched the table above.
+
+| Measurement | Value |
+| --- | --- |
+| Fork block | 12018906 |
+| Tick before | 198487 |
+| Tick after attacker | 198477 |
+| Quoted WETH out before the attack (wei) | 8306140005511 |
+| Unprotected WETH out after the attack (wei) | 8297097263431 |
+| Protected revert | MinimumOutputNotMet |
+| Active liquidity before | 1541399567004 |
+| Active liquidity after the attacker | 1541399567004 |
 
 ## What the revert proves, and what it does not
 

@@ -83,7 +83,7 @@ Consequences a reader should internalise:
 - A stale environment file is a startup failure, not a degraded mode. That is the intent.
 - The pinned values must be edited in code, reviewed, and redeployed when the contracts are redeployed. A configuration file alone cannot retarget the service.
 
-The pool configuration is exposed to clients through `GET /config/protected-pool`, which reports `configurationStatus: "valid"` and `poolReadiness: "not-checked"` ([backend/src/config/runtimeConfig.ts:120](../../backend/src/config/runtimeConfig.ts#L120)). The `not-checked` value is not a placeholder for an unimplemented check that would return `ready`: the backend has no pool-state read path at all. Pool readiness is assessed by the frontend from RPC reads. `runtimeConfig.test.ts` has a test asserting the response does not claim the pool is initialised or liquid.
+The pool configuration is exposed to clients through `GET /config/protected-pool`, which reports `configurationStatus: "valid"` and `poolReadiness: "not-checked"` ([backend/src/config/runtimeConfig.ts:120](../../backend/src/config/runtimeConfig.ts#L120)). The `not-checked` value is not a placeholder for an unimplemented check that would return `ready`: this route does not read the pool. Pool readiness for the trade page is still assessed by the frontend from RPC reads. `runtimeConfig.test.ts` has a test asserting the response does not claim the pool is initialised or liquid. `/risk-preview` and `/policy` do read `slot0` and active liquidity, and only for the price-impact estimate below.
 
 ## Policy signing gate
 
@@ -96,35 +96,51 @@ When signing is disabled, `POST /policy` answers 503 before reading the body, so
 When signing is enabled, the route performs these steps in order:
 
 1. Parse the body with `PolicyRequestSchema`.
-2. In demo mode, require `minAmountOut` to be exactly `"1"`; outside demo mode, reject `minAmountOut` of `"1"` ([backend/src/server.ts:160](../../backend/src/server.ts#L160), [backend/src/server.ts:173](../../backend/src/server.ts#L173)).
+2. In demo mode, require `minAmountOut` to be exactly `"1"`; outside demo mode, reject `minAmountOut` of `"1"` ([backend/src/server.ts:188](../../backend/src/server.ts#L188), [backend/src/server.ts:201](../../backend/src/server.ts#L201)).
 3. Require a signer wallet, else 503.
 4. Require the requested pool id to equal the configured protected pool id, else 400.
 5. Require the requested trader to equal the configured router, else 400.
 6. Log `risk_analysis_started`.
-7. `generatePolicy` to compute `maxLoss` and `maxFee`.
-8. Log `risk_analysis_completed` and `policy_created`.
-9. `signProtectedPolicy`, which re-asserts the pool id before signing, then logs `policy_signed`.
-10. Derive `policyId` and record the request id correlation.
-11. Respond with the policy, the signature, `policyId`, `requestId` and `demoMode`.
+7. Read the protected pool's `slot0` and active liquidity ([backend/src/server.ts:258](../../backend/src/server.ts#L258)). A failed read returns 503 `pool_state_unavailable` and does not sign.
+8. `generatePolicy` to compute `maxLoss` and `maxFee` from that pool state.
+9. Log `risk_analysis_completed` and `policy_created`.
+10. `signProtectedPolicy`, which re-asserts the pool id before signing, then logs `policy_signed`.
+11. Derive `policyId` and record the request id correlation.
+12. Respond with the policy, the signature, the risk fields, `policyId`, `requestId` and `demoMode`.
 
-Any thrown error after step 1 is logged as `policy_request_failed` and answered with 500 plus `{ "error": "Internal error", "requestId": … }` ([backend/src/server.ts:306](../../backend/src/server.ts#L306)). A Zod error is answered with 400 instead.
+A Zod error is answered with 400. `PoolStateUnavailableError` is answered with 503 and the error message. Any other thrown error after step 1 is logged as `policy_request_failed` and answered with 500 plus `{ "error": "Internal error", "code": "internal_error", "requestId": … }` ([backend/src/server.ts:337](../../backend/src/server.ts#L337)).
 
 ## Risk model
 
-`calculateRisk` is a pure function ([backend/src/risk/riskEngine.ts:12](../../backend/src/risk/riskEngine.ts#L12)).
+`calculateRisk` quotes price impact from the current pool's active liquidity ([backend/src/risk/riskEngine.ts:81](../../backend/src/risk/riskEngine.ts#L81)). Callers pass `sqrtPriceX96`, `liquidity`, and `feePips` from the pool read. The function does not read the mempool, compare transactions, or detect a sandwich. It does not fall back to `amount / 1000`.
 
+```text
+amount = abs(amountSpecified)
+fee = amount * feePips / 1_000_000
+amountIn = amount - fee
+estimatedFee = fee
+
+zeroForOne (token0 in, price down):
+  nextSqrt = ceil(L * 2^96 * sqrtP / (L * 2^96 + amountIn * sqrtP))
+  amountOut = L * (sqrtP - nextSqrt) / 2^96
+  outputValueInInput = amountOut * 2^96 / sqrtP * 2^96 / sqrtP
+
+oneForZero (token1 in, price up):
+  nextSqrt = sqrtP + amountIn * 2^96 / L
+  amountOut = L * 2^96 * (nextSqrt - sqrtP) / (nextSqrt * sqrtP)
+  outputValueInInput = amountOut * sqrtP / 2^96 * sqrtP / 2^96
+
+estimatedLoss = amountIn - outputValueInInput
+lossBps = estimatedLoss * 10_000 / amount
+maxLoss = estimatedLoss * 2
+maxFee = estimatedFee * 2
 ```
-absolute    = amountSpecified < 0 ? -amountSpecified : amountSpecified
-estimatedLoss = absolute / 1000
-estimatedFee  = absolute / 10000
-maxLoss       = estimatedLoss * 2
-maxFee        = estimatedFee * 2
-riskLevel     = "LOW"
-```
 
-`zeroForOne` is accepted in the input type and is not used by the calculation. The result type narrows `riskLevel` to the literal `"LOW"`, so `MEDIUM` and `HIGH` cannot be produced. The frontend validator still accepts all three strings ([frontend/src/lib/apiValidation.ts:99](../../frontend/src/lib/apiValidation.ts#L99)), because it validates a wire format rather than the current model.
+`L` is active liquidity and `sqrtP` is `sqrtPriceX96`. `estimatedLoss` is only the curvature shortfall against the spot price, in input-token units. Integer division rounds the quoted output value down. `zeroForOne` chooses the direction. The level is `LOW` when `lossBps <= 10`, `MEDIUM` when `lossBps <= 50`, and `HIGH` when `lossBps > 50`. If active liquidity cannot support the trade, `estimatedLoss` is the full input and the level is `HIGH`.
 
-The same function feeds two paths: `/risk-preview`, which returns the estimate directly, and `/policy`, which writes `maxLoss` and `maxFee` into the signed policy. So the signed caps are always exactly twice a fixed fraction of the trade size. That is a modelling limitation rather than an enforcement bug, and the disclaimer field says so in the response body.
+The frontend validator accepts `LOW`, `MEDIUM`, and `HIGH` ([frontend/src/lib/apiValidation.ts:102](../../frontend/src/lib/apiValidation.ts#L102)).
+
+The same function feeds `/risk-preview`, which returns the estimate directly, and `/policy`, which writes `maxLoss` and `maxFee` into the signed policy. Those caps are twice the estimates. The hook compares them with the numbers the caller puts in `hookData`. It does not measure this loss. The response `model` is `active-liquidity-impact`. The disclaimer says the estimate uses the current pool state for this trade size and does not read the mempool or detect sandwich attacks.
 
 ## Signing
 
@@ -150,7 +166,7 @@ These are behaviours of the current code that a reader should not have to discov
 - No request-size or numeric bound beyond the schema. `amountSpecified` and `expiry` are bounded by regex and by the 30-minute expiry window; `poolId` and `trader` are regex-checked hex.
 - The frontend requests a 10-minute lifetime through `buildPolicyExpiry`, which stays inside the backend's 30-minute ceiling ([frontend/src/config/policy.ts:23](../../frontend/src/config/policy.ts#L23), [backend/src/policy/policyRequest.ts:6](../../backend/src/policy/policyRequest.ts#L6)). The ceiling is short on purpose: it bounds the replay window for a signed policy. The frontend mirrors the ceiling as a local constant rather than importing it, so the two values could drift in principle; `frontend/src/config/policy.test.mjs` fails when the requested TTL reaches or exceeds the mirrored ceiling. See [data model](../architecture/data-model.md#nonce-lifecycle).
 - `generatePolicy` has no direct unit test. It is exercised only through the route tests, and only up to the point where a signer would be required.
-- The risk model ignores direction, pool state and amount of liquidity.
+- The risk model is a within-tick quote. It does not walk neighboring ticks, read the mempool, or detect a sandwich. A trade that leaves the current range can cost more than the estimate. A failed pool read fails the request; it does not invent a loss from the amount alone.
 - The monitor is fail-open for policy correlation. If the monitor is disabled or erroring, the swap still happens; only the correlation log is missing. See [monitoring](monitoring.md).
 
 ## Running the service

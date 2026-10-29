@@ -101,7 +101,7 @@ No parameters, no body.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `configurationStatus` | string | Always the literal `"valid"`. The route cannot serve an invalid configuration because startup would have failed |
-| `poolReadiness` | string | Always the literal `"not-checked"`. The backend performs no pool-state read |
+| `poolReadiness` | string | Always the literal `"not-checked"`. This route does not read the pool |
 | `chainId` | number | Always `11155111` |
 | `poolKey.currency0` | address | USDC on Sepolia |
 | `poolKey.currency1` | address | WETH on Sepolia |
@@ -110,7 +110,7 @@ No parameters, no body.
 | `poolKey.hooks` | address | The MEVShield hook |
 | `poolId` | bytes32 | Recomputed from the pool key and compared to `PROTECTED_POOL_ID` |
 
-`poolReadiness` is a fixed literal, not a status that another code path might upgrade. A caller that reads it as "the pool is usable" is reading it wrong: initialisation and liquidity are checked by the frontend over RPC.
+`poolReadiness` is a fixed literal, not a status that another code path might upgrade. A caller that reads it as "the pool is usable" is reading it wrong: initialisation and liquidity for the trade page are checked by the frontend over RPC. `/risk-preview` and `/policy` read `slot0` and active liquidity separately, and only to price the impact estimate.
 
 Source: [backend/src/config/runtimeConfig.ts:120](../../backend/src/config/runtimeConfig.ts#L120).
 
@@ -120,7 +120,7 @@ The frontend requires every field, including `configurationStatus === "valid"` a
 
 ## POST /risk-preview
 
-Returns the deterministic risk estimate for a swap size. Does not sign, does not register, does not touch chain state.
+Returns the price-impact estimate for a swap size against the protected pool's current active liquidity. Does not sign, does not register, and does not submit a transaction. It does read pool state over RPC. A failed read is `503`, not a substitute formula.
 
 ### Request body
 
@@ -136,35 +136,62 @@ Returns the deterministic risk estimate for a swap size. Does not sign, does not
 | `amountSpecified` | string | yes | Must match `^-?\d{1,78}$`. Parsed as `BigInt`. Zero is rejected after parsing |
 | `zeroForOne` | boolean | yes | Strict boolean |
 
-The schema is not `.strict()`, so additional properties are ignored rather than rejected ([backend/src/risk/riskPreview.ts:8](../../backend/src/risk/riskPreview.ts#L8)).
+The schema is not `.strict()`, so additional properties are ignored rather than rejected ([backend/src/risk/riskPreview.ts:9](../../backend/src/risk/riskPreview.ts#L9)). Pool price and liquidity are not request fields. The server reads them.
 
 `amountSpecified` is not bounded by the schema beyond the 78-digit limit. A value beyond `2^255 - 1` would overflow the `int256` the policy uses, but this route does not construct a policy, so it does not check that bound.
 
 ### Response 200
 
+`model` is always `active-liquidity-impact`. The disclaimer is always:
+
+> Estimates price impact from the current pool state for this trade size. It does not read the mempool or detect sandwich attacks.
+
+The numbers are not a fixed fraction of `amountSpecified`. They come from `calculateRisk` ([backend/src/risk/riskEngine.ts:81](../../backend/src/risk/riskEngine.ts#L81)) for the pool state read on this request. The same body can return `LOW`, `MEDIUM`, or `HIGH` as that state changes. The JSON below is the unit-test case in `riskPreview.test.ts`: amount `10^18`, `zeroForOne` true, `sqrtPriceX96 = 2^96`, liquidity `10^30`, fee `3000`. It is not what the sample request above returns on Sepolia.
+
 ```json
 {
-  "estimatedLoss": "1000000000000",
-  "estimatedFee": "100000000000",
-  "maxLoss": "2000000000000",
-  "maxFee": "200000000000",
+  "estimatedLoss": "994010",
+  "estimatedFee": "3000000000000000",
+  "maxLoss": "1988020",
+  "maxFee": "6000000000000000",
   "riskLevel": "LOW",
-  "model": "deterministic-mvp",
-  "disclaimer": "Formula-based estimates only. Not a live market-risk measurement or a prediction of sandwich-attack probability."
+  "model": "active-liquidity-impact",
+  "disclaimer": "Estimates price impact from the current pool state for this trade size. It does not read the mempool or detect sandwich attacks."
 }
+```
+
+`L` is active liquidity. `sqrtP` is `sqrtPriceX96`. `amount` is `abs(amountSpecified)`.
+
+```text
+fee = amount * feePips / 1_000_000
+amountIn = amount - fee
+estimatedFee = fee
+
+zeroForOne (token0 in, price down):
+  nextSqrt = ceil(L * 2^96 * sqrtP / (L * 2^96 + amountIn * sqrtP))
+  amountOut = L * (sqrtP - nextSqrt) / 2^96
+  outputValueInInput = amountOut * 2^96 / sqrtP * 2^96 / sqrtP
+
+oneForZero (token1 in, price up):
+  nextSqrt = sqrtP + amountIn * 2^96 / L
+  amountOut = L * 2^96 * (nextSqrt - sqrtP) / (nextSqrt * sqrtP)
+  outputValueInInput = amountOut * sqrtP / 2^96 * sqrtP / 2^96
+
+estimatedLoss = amountIn - outputValueInInput
+lossBps = estimatedLoss * 10_000 / amount
 ```
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `estimatedLoss` | decimal string | `abs(amountSpecified) / 1000`, integer division |
-| `estimatedFee` | decimal string | `abs(amountSpecified) / 10000`, integer division |
+| `estimatedLoss` | decimal string | Curvature shortfall of `amountIn` against the spot price, in input-token units. The full input amount when the pool cannot support the trade |
+| `estimatedFee` | decimal string | `amount * feePips / 1_000_000`, the pool swap fee, not the impact |
 | `maxLoss` | decimal string | `estimatedLoss * 2` |
 | `maxFee` | decimal string | `estimatedFee * 2` |
-| `riskLevel` | string | Always `"LOW"` |
-| `model` | string | Always `"deterministic-mvp"` |
+| `riskLevel` | string | `LOW` when `lossBps <= 10`, `MEDIUM` when `lossBps <= 50`, `HIGH` above that. An unsupported quote is `HIGH` |
+| `model` | string | Always `"active-liquidity-impact"` |
 | `disclaimer` | string | Fixed text, stated above |
 
-All numeric fields are strings to avoid JavaScript precision loss. The values are in the base units of `amountSpecified`; the route does not know the token, so it does not scale them.
+All numeric fields are strings to avoid JavaScript precision loss. The values are in the base units of `amountSpecified`. The route does not apply a separate decimals scale. The quote does not walk neighboring ticks, read the mempool, or detect a sandwich.
 
 ### Errors
 
@@ -172,10 +199,12 @@ All numeric fields are strings to avoid JavaScript precision loss. The values ar
 | --- | --- | --- | --- |
 | 400 | `invalid_preview` | `Invalid risk-preview request` | Schema validation failed. `details` is the Zod issue array |
 | 400 | `invalid_preview` | `amountSpecified must not be zero` | Zero after parsing |
+| 503 | `pool_state_unavailable` | The `PoolStateUnavailableError` message | RPC missing, pool uninitialized, or the `slot0` / liquidity read failed. No estimate is returned |
+| 500 | `internal_error` | `Internal error` | Any other thrown error |
 
-Both carry `requestId`. See [Error body shape](#error-body-shape).
+Each row carries `requestId`. See [Error body shape](#error-body-shape).
 
-Source: [backend/src/server.ts:123](../../backend/src/server.ts#L123).
+Source: [backend/src/server.ts:133](../../backend/src/server.ts#L133).
 
 ---
 
@@ -230,7 +259,7 @@ Beyond the schema, the route applies six more rules, in this order:
 | 5 | `poolId` must equal the configured protected pool id | 400, `"Invalid protected pool"` |
 | 6 | `trader` must equal the configured router address | 400, `"Invalid policy trader"` |
 
-Rules 5 and 6 are the only content checks that tie the request to the deployment. A caller may still choose `nonce`, `expiry`, `amountSpecified`, `zeroForOne`, `sqrtPriceLimitX96` and, outside demo mode, any positive `minAmountOut`. The route does not consult pool state, so it cannot tell whether the limit is reachable or whether the minimum output is achievable.
+Rules 5 and 6 are the only content checks that tie the request to the deployment. A caller may still choose `nonce`, `expiry`, `amountSpecified`, `zeroForOne`, `sqrtPriceLimitX96` and, outside demo mode, any positive `minAmountOut`. After those checks the route reads `slot0` and active liquidity and prices `maxLoss` and `maxFee` with `calculateRisk`. It still does not check whether the price limit is on the correct side of the tick, whether it is inside the router's 600-tick cap, or whether `minAmountOut` is achievable.
 
 ### Response 200
 
@@ -241,18 +270,18 @@ Rules 5 and 6 are the only content checks that tie the request to the deployment
     "trader": "0x633282608B2fc66cD7572f5eF58e804063aa150D",
     "nonce": "1730123456789",
     "expiry": "1730127056",
-    "maxLoss": "2000000000000",
-    "maxFee": "200000000000",
+    "maxLoss": "<estimatedLoss * 2>",
+    "maxFee": "<estimatedFee * 2>",
     "zeroForOne": false,
     "amountSpecified": "-1000000000000000",
     "sqrtPriceLimitX96": "1461446703485210103287273052203988822378723970340",
     "minAmountOut": "1900000"
   },
-  "estimatedLoss": "1000000000000",
-  "estimatedFee": "100000000000",
-  "riskLevel": "LOW",
-  "model": "deterministic-mvp",
-  "disclaimer": "Formula-based estimates only. Not a live market-risk measurement or a prediction of sandwich-attack probability.",
+  "estimatedLoss": "<curvature shortfall, input-token units>",
+  "estimatedFee": "<amount * feePips / 1000000>",
+  "riskLevel": "<LOW, MEDIUM, or HIGH>",
+  "model": "active-liquidity-impact",
+  "disclaimer": "Estimates price impact from the current pool state for this trade size. It does not read the mempool or detect sandwich attacks.",
   "signature": "0x...",
   "policyId": "0x...",
   "requestId": "3f2b...",
@@ -266,17 +295,17 @@ Rules 5 and 6 are the only content checks that tie the request to the deployment
 | `policy.trader` | address string | Echoed from the request after the router check |
 | `policy.nonce` | decimal string | Echoed |
 | `policy.expiry` | decimal string | Echoed |
-| `policy.maxLoss` | decimal string | Computed by the risk model. Not caller-supplied |
-| `policy.maxFee` | decimal string | Computed by the risk model. Not caller-supplied |
+| `policy.maxLoss` | decimal string | `estimatedLoss * 2` from the price-impact quote. Not caller-supplied |
+| `policy.maxFee` | decimal string | `estimatedFee * 2` from the same quote. Not caller-supplied |
 | `policy.zeroForOne` | boolean | Echoed |
 | `policy.amountSpecified` | decimal string, may be negative | Echoed |
 | `policy.sqrtPriceLimitX96` | decimal string | Echoed |
 | `policy.minAmountOut` | decimal string | Echoed |
-| `estimatedLoss` | decimal string | The value the frontend later puts in `hookData` |
-| `estimatedFee` | decimal string | The value the frontend later puts in `hookData` |
-| `riskLevel` | string | Always `"LOW"` |
-| `model` | string | Always `"deterministic-mvp"` |
-| `disclaimer` | string | Fixed text |
+| `estimatedLoss` | decimal string | Curvature shortfall from the formula under [POST /risk-preview](#post-risk-preview). The value the frontend later puts in `hookData` |
+| `estimatedFee` | decimal string | Pool swap fee, `amount * feePips / 1_000_000`. The value the frontend later puts in `hookData` |
+| `riskLevel` | string | `LOW` at `lossBps <= 10`, `MEDIUM` at `lossBps <= 50`, `HIGH` above that |
+| `model` | string | Always `"active-liquidity-impact"` |
+| `disclaimer` | string | Fixed text. States the estimate uses current pool state for this trade size and does not read the mempool or detect sandwich attacks |
 | `signature` | 65-byte hex | EIP-712 signature from the authorized signer |
 | `policyId` | bytes32 string | `keccak256(abi.encode(poolId, trader, nonce))` |
 | `requestId` | string | The request id for this call, also in the response header |
@@ -296,11 +325,12 @@ The frontend cross-checks every echoed field against what it sent, and compares 
 | 400 | `invalid_trader` | `Invalid policy trader` | `trader` is not the configured router |
 | 400 | `invalid_request` | `Invalid request` | Zod validation failed. `details` is the issue array |
 | 400 | `invalid_json` | `Invalid JSON body` | Body was not parseable JSON |
+| 503 | `pool_state_unavailable` | The `PoolStateUnavailableError` message | Pool `slot0` or liquidity could not be read. The route does not sign |
 | 500 | `internal_error` | `Internal error` | Any other thrown error, including a signing failure |
 
-Every row carries `requestId`. Only the 500 body omits `details`. See [Error body shape](#error-body-shape).
+Every row carries `requestId`. `pool_state_unavailable` puts the read failure in `error` and does not add `details`. The 500 body also omits `details`. See [Error body shape](#error-body-shape).
 
-The 500 body is a fixed message, the `internal_error` code and the request id. It deliberately does not include the exception message, so a signing error cannot leak key material or internal paths. The exception is logged server-side as `policy_request_failed` against the same request id. Source: [backend/src/server.ts:346](../../backend/src/server.ts#L346).
+The 500 body is a fixed message, the `internal_error` code and the request id. It deliberately does not include the exception message, so a signing error cannot leak key material or internal paths. The exception is logged server-side as `policy_request_failed` against the same request id. Source: [backend/src/server.ts:354](../../backend/src/server.ts#L354).
 
 Every failure after the gate is also logged as `policy_request_failed` at error level with the error name and message.
 
@@ -308,7 +338,8 @@ Every failure after the gate is also logged as `policy_request_failed` at error 
 
 - It does not register the policy. Registration is a wallet transaction to `PolicyAuthorization.registerPolicy`.
 - It does not check that the policy's `minAmountOut` is achievable.
-- It does not check pool liquidity, price, or the 600-tick distance.
+- It reads pool price and active liquidity for the price-impact estimate. It does not check the 600-tick distance or whether the limit is legal at the current tick.
+- It does not read the mempool or detect a sandwich.
 - It does not limit how many signatures a caller may request.
 - It does not verify that the caller controls `trader`. The `trader` field must equal the router, which is a contract, so no caller ever controls it directly.
 

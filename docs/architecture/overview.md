@@ -27,7 +27,7 @@ graph LR
   browser -->|"GET /health, GET /config/protected-pool"| backend["Express backend"]
   browser -->|"POST /risk-preview, POST /policy"| backend
   backend -->|"EIP-712 signature"| browser
-  backend -->|"eth_getLogs, receipts"| rpc
+  backend -->|"eth_getLogs, receipts, slot0, liquidity"| rpc
   chain --> poolmanager["Uniswap v4 PoolManager"]
   poolmanager -->|"beforeSwap"| hook["MEVShieldHook"]
   hook --> authorization["PolicyAuthorization"]
@@ -171,7 +171,7 @@ The caps are therefore a bound on a caller-supplied estimate, not a measurement 
 
 Off-chain code produces and grades inputs. It cannot prevent a transaction that has a valid signature from executing.
 
-- Risk estimation runs in the backend as a closed-form function ([backend/src/risk/riskEngine.ts:12](../../backend/src/risk/riskEngine.ts#L12)). Every non-zero amount produces `estimatedLoss = amount / 1000` and `estimatedFee = amount / 10000`, and `maxLoss` and `maxFee` are twice those values. `riskLevel` is always `LOW`. The response carries a disclaimer stating the figures are not a live measurement ([backend/src/risk/riskPreview.ts:6](../../backend/src/risk/riskPreview.ts#L6)).
+- Risk estimation runs in the backend as a closed-form price-impact quote ([backend/src/risk/riskEngine.ts:81](../../backend/src/risk/riskEngine.ts#L81)). It uses the protected pool's current `sqrtPriceX96`, active liquidity, and fee, plus the trade amount and `zeroForOne`. The swap fee is `amount * feePips / 1_000_000`. `estimatedLoss` is the within-tick curvature shortfall of the amount after that fee against the spot price, with active liquidity as the depth proxy. `lossBps = estimatedLoss * 10_000 / amount`. The level is `LOW` at 10 basis points or below, `MEDIUM` at 50 or below, and `HIGH` above that. If active liquidity cannot support the trade, `estimatedLoss` is the full input and the level is `HIGH`. There is no fallback to `amount / 1000`. `maxLoss` and `maxFee` are twice the estimates. The disclaimer says the figure estimates price impact from the current pool state for this trade size, and that it does not read the mempool or detect a sandwich ([backend/src/risk/riskPreview.ts:6](../../backend/src/risk/riskPreview.ts#L6)). The hook does not measure this loss.
 - Policy signing runs in the backend and refuses a pool id that is not the pinned protected pool ([backend/src/policy/policySigning.ts:24](../../backend/src/policy/policySigning.ts#L24)).
 - Readiness gating runs in the frontend and decides whether the UI will offer the sign and execute steps ([frontend/src/lib/protectedQuote.ts:310](../../frontend/src/lib/protectedQuote.ts#L310)).
 - Configuration pinning runs in the backend at startup and refuses to start on a chain, verifier, router or pool that does not match the pinned Sepolia deployment ([backend/src/config/runtimeConfig.ts:158](../../backend/src/config/runtimeConfig.ts#L158)).
