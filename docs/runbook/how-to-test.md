@@ -67,7 +67,7 @@ Reset warning. An already-running stack that was started before the DeployLocal 
 
 `--down` runs `docker compose down --volumes --remove-orphans` and exits. That removes the in-memory chain. A fresh `up` deploys `PolicyAuthorization` as the registrar, which is what `script/DeployLocal.s.sol` does now.
 
-Wallet. The local page does not need a browser extension. **Use anvil account**, and **Connect wallet** when no extension is installed, both sign with anvil account `#0` on chain `31337`. A bundle built with no `VITE_CHAIN_ID` is Sepolia: the top bar reads `Sepolia · 11155111` and Connect wallet asks you to install a browser wallet. Chain id `1` is not this chain. Rebuild with `./script/local-test-flow.sh`. Do not run `npm run build` in `frontend/` while `mevshield-local-test-frontend` is serving `frontend/dist`. The test script prints account `#0`:
+Wallet. With MetaMask installed, click **Connect wallet**. That uses the account you approve. It asks MetaMask to switch to chain `31337`, or to add it from this bundle's RPC if the chain is new. It does not substitute the anvil key. On this local chain the page then gives that account anvil ETH and asks MetaMask to mint the mock tokens. **Use anvil account**, and **Connect wallet** when no extension is installed, both sign with anvil account `#0` on chain `31337`. A bundle built with no `VITE_CHAIN_ID` is Sepolia: the top bar reads `Sepolia · 11155111` and Connect wallet asks you to install a browser wallet. Chain id `1` is not this chain. Rebuild with `./script/local-test-flow.sh`. Do not run `npm run build` in `frontend/` while `mevshield-local-test-frontend` is serving `frontend/dist`. The test script prints account `#0`:
 
 ```text
 RPC         http://localhost:<anvil port>

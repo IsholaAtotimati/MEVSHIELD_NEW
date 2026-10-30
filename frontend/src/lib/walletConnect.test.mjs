@@ -8,9 +8,13 @@ import {
   ANVIL_ACCOUNT_KEY,
   WALLET_ERROR,
   WALLET_STATUS,
+  hexChainId,
+  injectedChainParams,
   injectedWalletMissingMessage,
+  isUnknownChainError,
   planConnectAnvil,
   planConnectWallet,
+  selectInjectedChain,
   showsAnvilAccountButton,
 } from "./walletConnect.ts";
 
@@ -123,6 +127,70 @@ test("an injected provider on Sepolia connects that wallet", () => {
     }),
     { kind: "injected" },
   );
+});
+
+test("an injected wallet already on the bundle chain is not switched", async () => {
+  const calls = [];
+  await selectInjectedChain(
+    async (args) => {
+      calls.push(args.method);
+      return "0x7a69";
+    },
+    { chainId: LOCAL_CHAIN_ID, chainName: "Anvil Local", rpcUrl: "http://localhost:8545" },
+  );
+  assert.deepEqual(calls, ["eth_chainId"]);
+});
+
+test("an unknown chain is added from the bundle config, not from a key", async () => {
+  const calls = [];
+  await selectInjectedChain(
+    async (args) => {
+      calls.push(args);
+      if (args.method === "eth_chainId") return "0x1";
+      if (args.method === "wallet_switchEthereumChain") {
+        throw { code: 4902, message: "Unrecognized chain ID" };
+      }
+      return null;
+    },
+    { chainId: LOCAL_CHAIN_ID, chainName: "Anvil Local", rpcUrl: "http://127.0.0.1:8545" },
+  );
+  assert.equal(calls[1].method, "wallet_switchEthereumChain");
+  assert.equal(calls[2].method, "wallet_addEthereumChain");
+  assert.deepEqual(calls[2].params[0], {
+    chainId: "0x7a69",
+    chainName: "Anvil Local",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: ["http://127.0.0.1:8545"],
+  });
+  assert.equal(JSON.stringify(calls).includes(ANVIL_ACCOUNT_KEY), false);
+});
+
+test("a rejected chain switch is not replaced with the anvil account", async () => {
+  await assert.rejects(
+    () =>
+      selectInjectedChain(
+        async (args) => {
+          if (args.method === "eth_chainId") return "0xaa36a7";
+          throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+        },
+        { chainId: LOCAL_CHAIN_ID, chainName: "Anvil Local", rpcUrl: "http://localhost:8545" },
+      ),
+    (error) => {
+      assert.equal(isUnknownChainError(error), false);
+      assert.equal(error.code, 4001);
+      return true;
+    },
+  );
+});
+
+test("31337 and Sepolia hex chain ids stay exact", () => {
+  assert.equal(hexChainId(LOCAL_CHAIN_ID), "0x7a69");
+  assert.equal(hexChainId(SEPOLIA_CHAIN_ID), "0xaa36a7");
+  assert.equal(injectedChainParams({
+    chainId: SEPOLIA_CHAIN_ID,
+    chainName: "Sepolia",
+    rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
+  }).chainId, "0xaa36a7");
 });
 
 test("status strings the top bar renders stay stable", () => {

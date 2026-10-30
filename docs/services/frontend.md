@@ -6,18 +6,27 @@ Source: `frontend/src`. Entry point: [frontend/src/main.tsx](../../frontend/src/
 
 ## Route map
 
-Routing uses `react-router-dom` in browser-history mode. There are five routes under one shell layout and a catch-all that redirects to the trade page ([frontend/src/App.tsx:15](../../frontend/src/App.tsx#L15)).
+Routing uses `react-router-dom` in browser-history mode. `/` is the landing page, outside the shell. Five console routes sit under one shell layout, and a catch-all redirects to the landing page ([frontend/src/App.tsx:17](../../frontend/src/App.tsx#L17)).
 
 | Path | Component | Purpose |
 | --- | --- | --- |
-| `/` | `TradePage` | The protected swap flow: amount, direction, risk check, policy signing, execution |
+| `/` | `LandingPage` | Public introduction. Connect wallet, or Enter app when a wallet is already connected. On chain 31337 it also offers the anvil account |
+| `/trade` | `TradePage` | The protected swap flow: amount, direction, risk check, policy signing, execution |
 | `/activity` | `ActivityPage` | Local and on-chain activity for the connected wallet, with CSV export |
 | `/portfolio` | `PortfolioPage` | ETH, WETH and USDC balances, wrap and unwrap, exact-amount router allowances |
 | `/policies` | `PoliciesPage` | Inspect a policy by id and edit local defaults |
 | `/network` | `NetworkPage` | Contract address verification, authorized signer, backend health and monitor state |
 | `*` | redirect to `/` | Unmatched paths |
 
-The shell renders a fixed side navigation, a demo banner that appears only in demo mode, a top bar with wallet, network, gas and backend status, and the routed page ([frontend/src/layout/AppShell.tsx:7](../../frontend/src/layout/AppShell.tsx#L7)).
+The landing page does not render the shell. The shell renders a fixed side navigation, a demo banner that appears only in demo mode, a top bar with wallet, network, gas and backend status, and the routed page ([frontend/src/layout/AppShell.tsx:7](../../frontend/src/layout/AppShell.tsx#L7)). The Trade link points at `/trade`. Activity links back to `/trade` as well.
+
+## Landing page
+
+`LandingPage` is the public entry. It is one page component. The two pictures on it, the policy card and the wallet-to-pool diagram, are private functions in that file because nothing else renders them. Shared controls stay the existing `Button` and `Kicker`. Every landing class is in [frontend/src/index.css](../../frontend/src/index.css), the only stylesheet.
+
+The header action is decided by `landingAction` in [frontend/src/lib/landingAction.ts](../../frontend/src/lib/landingAction.ts). An account links to `/trade`. No account runs `connectWallet`, and a returned account navigates to `/trade`. A refusal stays on `/` and shows the wallet status. Chain `31337` also shows **Use anvil account**, using `showsAnvilAccountButton`. The limit sentence comes from `landingLimit`. The lifetime label comes from `POLICY_TTL_SECONDS` through `policyLifetimeLabel`, and the pair label uses `SWAP_TOKENS` so a local build shows its own symbols. The policy card is labeled illustrative. It is not a quote.
+
+Sections, in order: hero, four facts, how it works, what the router checks, a closing connect action, and a footer with the console routes. In-page links use `#how` and `#checks`, with scroll margin so the sticky header does not cover them.
 
 Navigation labels come from a static list ([frontend/src/layout/SideNav.tsx:3](../../frontend/src/layout/SideNav.tsx#L3)). There is no route-level authentication and no route-level data guard: every page renders without a wallet and shows a connect prompt where a wallet is required.
 

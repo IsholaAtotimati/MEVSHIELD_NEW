@@ -112,7 +112,7 @@ export default function ActivityPage() {
             <p className="note">
               Use <strong>Connect wallet</strong> in the top bar. Then run a
               dummy trade on the{" "}
-              <Link className="link" to="/">
+              <Link className="link" to="/trade">
                 Trade
               </Link>{" "}
               page and come back here for the proof record.
@@ -164,7 +164,7 @@ export default function ActivityPage() {
                 <p>No protected swap activity yet for this wallet.</p>
                 <p className="note">
                   Start with a dummy trade on{" "}
-                  <Link className="link" to="/">
+                  <Link className="link" to="/trade">
                     Trade
                   </Link>
                   , then return here for the proof record.

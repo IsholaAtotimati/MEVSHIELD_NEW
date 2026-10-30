@@ -73,3 +73,75 @@ export function injectedWalletMissingMessage(chainId: number): string {
     ? WALLET_ERROR.injectedMissingLocal
     : WALLET_ERROR.injectedMissingOther;
 }
+
+type WalletRequest = (args: {
+  method: string;
+  params?: unknown[];
+}) => Promise<unknown>;
+
+/** Hex chain id MetaMask expects, derived from the numeric id. 31337 is 0x7a69. */
+export function hexChainId(chainId: number): string {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error("Chain id must be a positive integer.");
+  }
+  return `0x${chainId.toString(16)}`;
+}
+
+/**
+ * Parameters for wallet_addEthereumChain. The RPC and chain id come from the
+ * bundle's own config. Nothing here is an account or a key.
+ */
+export function injectedChainParams(input: {
+  chainId: number;
+  chainName: string;
+  rpcUrl: string;
+}): {
+  chainId: string;
+  chainName: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+  rpcUrls: string[];
+} {
+  return {
+    chainId: hexChainId(input.chainId),
+    chainName: input.chainName,
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: [input.rpcUrl],
+  };
+}
+
+/** MetaMask returns 4902 when the chain has not been added yet. */
+export function isUnknownChainError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  return (error as { code: unknown }).code === 4902;
+}
+
+/**
+ * Point an injected wallet at this bundle's chain.
+ *
+ * Already-correct wallets are left alone. A known chain is switched. An
+ * unknown chain is added, which also selects it. A rejected prompt is not
+ * turned into the anvil account.
+ */
+export async function selectInjectedChain(
+  request: WalletRequest,
+  input: { chainId: number; chainName: string; rpcUrl: string },
+): Promise<void> {
+  const target = hexChainId(input.chainId);
+  const current = await request({ method: "eth_chainId" });
+  if (typeof current === "string" && current.toLowerCase() === target) return;
+
+  try {
+    await request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: target }],
+    });
+  } catch (error) {
+    if (!isUnknownChainError(error)) throw error;
+    await request({
+      method: "wallet_addEthereumChain",
+      params: [injectedChainParams(input)],
+    });
+  }
+}

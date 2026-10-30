@@ -2,19 +2,22 @@ import { useCallback, useState } from "react";
 import type { Address } from "viem";
 import { formatEther } from "viem";
 
-import { IS_LOCAL_CHAIN } from "../config/chain";
+import { CHAIN_NAME, IS_LOCAL_CHAIN, RPC_URL } from "../config/chain";
 import { CHAIN_ID } from "../lib/contracts";
+import { fundInjectedLocalAccount } from "../lib/localFaucet";
 import {
   WALLET_ERROR,
   WALLET_STATUS,
   planConnectAnvil,
   planConnectWallet,
+  selectInjectedChain,
 } from "../lib/walletConnect";
 import {
   connectLocalAnvilAccount,
   disconnectLocalAnvilAccount,
   getWalletClient,
   publicClient,
+  usesLocalAnvilSigner,
 } from "../lib/viem";
 
 export function useWallet() {
@@ -30,7 +33,7 @@ export function useWallet() {
     setBalance(formatEther(balanceResult));
   }, []);
 
-  const connectWallet = useCallback(async () => {
+  const connectWallet = useCallback(async (): Promise<Address | null> => {
     setWalletStatus(WALLET_STATUS.connecting);
     try {
       const plan = planConnectWallet({
@@ -46,29 +49,43 @@ export function useWallet() {
         await refreshBalance(address);
         setChainId(CHAIN_ID);
         setWalletStatus(WALLET_STATUS.anvil);
-        return;
+        return address;
       }
 
       disconnectLocalAnvilAccount();
+      if (!window.ethereum) {
+        throw new Error(WALLET_ERROR.browserRequired);
+      }
       const walletClient = getWalletClient();
       const [address] = await walletClient.requestAddresses();
       if (!address) {
         throw new Error(WALLET_ERROR.noAccount);
       }
+      await selectInjectedChain(window.ethereum.request.bind(window.ethereum), {
+        chainId: CHAIN_ID,
+        chainName: CHAIN_NAME,
+        rpcUrl: RPC_URL,
+      });
       setAccount(address);
+      if (IS_LOCAL_CHAIN) {
+        setWalletStatus("Approve the test-token mint in MetaMask");
+        await fundInjectedLocalAccount(walletClient, address);
+      }
       await refreshBalance(address);
       const id = await walletClient.getChainId();
       setChainId(id);
       setWalletStatus(WALLET_STATUS.connected);
+      return address;
     } catch (error) {
       console.error(error);
       setWalletStatus(
         error instanceof Error ? error.message : WALLET_STATUS.failed,
       );
+      return null;
     }
   }, [refreshBalance]);
 
-  const connectAnvil = useCallback(async () => {
+  const connectAnvil = useCallback(async (): Promise<Address | null> => {
     try {
       const plan = planConnectAnvil(CHAIN_ID);
       if (plan.kind === "refuse") {
@@ -79,11 +96,13 @@ export function useWallet() {
       await refreshBalance(address);
       setChainId(CHAIN_ID);
       setWalletStatus(WALLET_STATUS.anvil);
+      return address;
     } catch (error) {
       console.error(error);
       setWalletStatus(
         error instanceof Error ? error.message : WALLET_STATUS.anvilFailed,
       );
+      return null;
     }
   }, [refreshBalance]);
 
@@ -96,6 +115,13 @@ export function useWallet() {
   }, []);
 
   const ensureSepolia = useCallback(async () => {
+    if (!usesLocalAnvilSigner() && window.ethereum) {
+      await selectInjectedChain(window.ethereum.request.bind(window.ethereum), {
+        chainId: CHAIN_ID,
+        chainName: CHAIN_NAME,
+        rpcUrl: RPC_URL,
+      });
+    }
     const walletClient = getWalletClient();
     if ((await walletClient.getChainId()) !== CHAIN_ID) {
       await walletClient.switchChain({ id: CHAIN_ID });

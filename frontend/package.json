@@ -8,7 +8,7 @@
     "demo": "vite --mode demo",
     "build": "node scripts/localBundleGuard.mjs && tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/lib/networkVerification.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs src/lib/minimumOutputVerification.test.mjs src/lib/tickPrice.test.mjs src/lib/walletConnect.test.mjs scripts/localAnvilBundle.test.mjs",
+    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/lib/networkVerification.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs src/lib/minimumOutputVerification.test.mjs src/lib/tickPrice.test.mjs src/lib/walletConnect.test.mjs src/lib/landingAction.test.mjs scripts/localAnvilBundle.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -57,6 +57,11 @@ export function disconnectLocalAnvilAccount() {
   localAnvilClient = null;
 }
 
+/** True while Connect wallet is signing with the local anvil account. */
+export function usesLocalAnvilSigner(): boolean {
+  return localAnvilClient !== null;
+}
+
 export function getWalletClient(): AppWalletClient {
   if (localAnvilClient) return localAnvilClient;
   return createInjectedWallet();

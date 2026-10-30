@@ -4,7 +4,7 @@ import { shortAddress } from "../lib/format";
 import { useTrade } from "../context/TradeContext";
 
 const links = [
-  { to: "/", label: "Trade", end: true },
+  { to: "/trade", label: "Trade", end: true },
   { to: "/activity", label: "Activity" },
   { to: "/portfolio", label: "Portfolio" },
   { to: "/policies", label: "Policies" },

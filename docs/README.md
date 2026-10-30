@@ -78,6 +78,7 @@ Status vocabulary:
 | Page | Answers |
 | --- | --- |
 | [configuration.md](operations/configuration.md) | Every environment variable in all three layers, with required or optional, default, purpose and a safety note |
+| [public-release-draft.md](operations/public-release-draft.md) | Draft: wallet-first landing at `/`, console at `/trade`, Vercel in front of the existing Railway API |
 | [testing.md](operations/testing.md) | How to run each suite, what each covers, which fork suites are gated, and why the V2 fork suite does not test the deployed router |
 | [runbook/how-to-test.md](runbook/how-to-test.md) | The three commands a lead runs, and what a pass looks like |
 | [runbook/local-docker.md](runbook/local-docker.md) | Bringing the whole stack up locally in Docker against anvil: the images, the compose services, the deploy and seed scripts, the verification script, and the ports |
