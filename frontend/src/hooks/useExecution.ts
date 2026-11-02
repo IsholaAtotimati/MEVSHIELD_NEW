@@ -2,10 +2,8 @@ import { useCallback, useState } from "react";
 import type { Address, Hex } from "viem";
 import { encodeAbiParameters } from "viem";
 
-import { SEPOLIA_DEMO_MODE } from "../config/env";
+import { READ_ONLY_DEMO_MODE, SEPOLIA_DEMO_MODE } from "../config/env";
 import {
-  MIN_SQRT_PRICE_LIMIT_X96,
-  MAX_SQRT_PRICE_LIMIT_X96,
   SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
@@ -50,6 +48,12 @@ export function useExecution(args: UseExecutionArgs) {
   const [isExecuting, setIsExecuting] = useState(false);
 
   const executeProtectedSwap = useCallback(async () => {
+    const { setActionStatus } = args;
+    if (READ_ONLY_DEMO_MODE) {
+      setActionStatus("Swap execution is disabled in the hosted read-only demo.");
+      return;
+    }
+
     const {
       swapReadiness,
       zeroForOne,
@@ -66,7 +70,6 @@ export function useExecution(args: UseExecutionArgs) {
       refreshBalance,
       refreshInputBalance,
       loadPolicyById,
-      setActionStatus,
     } = args;
 
     if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
@@ -92,9 +95,7 @@ export function useExecution(args: UseExecutionArgs) {
     const amountBaseUnits = inputAmountBaseUnits;
     const amountSpecified =
       amountBaseUnits === null ? null : -amountBaseUnits;
-    const sqrtPriceLimitX96 = (
-      zeroForOne ? MIN_SQRT_PRICE_LIMIT_X96 : MAX_SQRT_PRICE_LIMIT_X96
-    ).toString();
+    const sqrtPriceLimitX96 = policy.policy.sqrtPriceLimitX96;
 
     logFrontend("protected_swap_execution_started", {
       requestId,
@@ -232,7 +233,7 @@ export function useExecution(args: UseExecutionArgs) {
             maxFee: BigInt(policy.policy.maxFee),
             zeroForOne: policy.policy.zeroForOne,
             amountSpecified: BigInt(policy.policy.amountSpecified),
-            sqrtPriceLimitX96: BigInt(policy.policy.sqrtPriceLimitX96),
+            sqrtPriceLimitX96: BigInt(sqrtPriceLimitX96),
             minAmountOut: BigInt(policy.policy.minAmountOut),
           },
           policy.signature as Hex,

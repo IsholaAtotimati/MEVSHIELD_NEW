@@ -90,11 +90,27 @@ export function loadAppDependencies(
 
 export function createApp(deps: AppDependencies): Express {
   const app = express();
-  const frontendUrl = deps.frontendUrl ?? "http://localhost:5173";
+  const configuredOrigins = (deps.frontendUrl ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const allowedOrigins =
+    configuredOrigins.length > 0
+      ? configuredOrigins
+      : process.env.NODE_ENV === "production"
+        ? []
+        : ["http://localhost:5173"];
 
   app.use(requestIdMiddleware);
   app.use(httpLifecycleMiddleware);
-  app.use(cors({ origin: frontendUrl, exposedHeaders: ["x-request-id"] }));
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        callback(null, !origin || allowedOrigins.includes(origin));
+      },
+      exposedHeaders: ["x-request-id"],
+    }),
+  );
   app.use(express.json());
 
   const TransactionEventSchema = z.object({

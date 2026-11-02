@@ -12,7 +12,7 @@ import StatLine from "../components/StatLine";
 import ToggleRow from "../components/ToggleRow";
 import {
   MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
-  SEPOLIA_DEMO_MODE,
+  DEMO_ESTIMATE_MODE,
 } from "../config/env";
 import { useTrade } from "../context/TradeContext";
 import { useActivityFeed } from "../hooks/useActivityFeed";
@@ -258,7 +258,7 @@ export default function ActivityPage() {
                 on={backend.health?.policySigningEnabled === true}
                 disabled
               />
-              <ToggleRow label="Demo mode" on={SEPOLIA_DEMO_MODE} disabled />
+              <ToggleRow label="Demo mode" on={DEMO_ESTIMATE_MODE} disabled />
             </div>
           </Card>
         </>

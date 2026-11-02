@@ -1,10 +1,11 @@
 import { CHAIN_ID } from "./chain";
 import { CONTRACTS } from "../lib/contracts";
 import { resolveMinimumOutputVerification } from "../lib/minimumOutputVerification";
-import { resolveDemoMode } from "./chainEnv";
+import { resolveDemoMode, resolveReadOnlyDemoMode } from "./chainEnv";
 
 export const BACKEND_URL =
-  import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV ? "http://localhost:4000" : "");
 
 /**
  * Deterministic demo estimate path.
@@ -21,6 +22,19 @@ export const SEPOLIA_DEMO_MODE = resolveDemoMode({
   devBuild: import.meta.env.DEV,
   flagValue: import.meta.env.VITE_SEPOLIA_DEMO_MODE,
 });
+
+/**
+ * Hosted demo mode displays estimates and allows risk previews but does not
+ * permit policy signing or execution.
+ */
+export const READ_ONLY_DEMO_MODE = resolveReadOnlyDemoMode({
+  chainId: CHAIN_ID,
+  devBuild: import.meta.env.DEV,
+  flagValue: import.meta.env.VITE_READ_ONLY_DEMO_MODE,
+});
+
+export const DEMO_ESTIMATE_MODE =
+  SEPOLIA_DEMO_MODE || READ_ONLY_DEMO_MODE;
 
 /**
  * Whether the signed-minimum-output v2 deployment is trusted.

@@ -1,6 +1,10 @@
 import { Link } from "react-router-dom";
 
-import { SEPOLIA_DEMO_MODE } from "../config/env";
+import {
+  DEMO_ESTIMATE_MODE,
+  READ_ONLY_DEMO_MODE,
+  SEPOLIA_DEMO_MODE,
+} from "../config/env";
 import {
   SWAP_POOL_CONFIGURATION,
   SWAP_POOL_ID,
@@ -82,6 +86,7 @@ export default function TradePage() {
     policy.isPreviewingRisk ||
     policy.isCreatingPolicy ||
     execution.isExecuting ||
+    (READ_ONLY_DEMO_MODE && primaryStep === "sign") ||
     (primaryStep === "sign" && !swapReadiness.canCheckRisk) ||
     (primaryStep === "check" && policy.isPreviewingRisk);
 
@@ -91,12 +96,14 @@ export default function TradePage() {
       return;
     }
     if (primaryStep === "sign") {
+      if (READ_ONLY_DEMO_MODE) return;
       await policy.createPolicy();
     }
   }
 
   const checklist = swapReadiness.reasons;
-  const lifecycleQuoted = quoteIsFresh || SEPOLIA_DEMO_MODE;
+  const executionChecklist = swapReadiness.executionReasons;
+  const lifecycleQuoted = quoteIsFresh;
   const lifecycleRegistered = Boolean(policy.policy?.registered);
   const lifecycleExecuted = Boolean(execution.execution);
 
@@ -109,8 +116,10 @@ export default function TradePage() {
   const poolLabel =
     SWAP_POOL_ID === null ? "unconfigured" : shortAddress(SWAP_POOL_ID);
 
-  const minimumOutput = SEPOLIA_DEMO_MODE
-    ? `${formatBaseUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (demo floor)`
+  const minimumOutput = READ_ONLY_DEMO_MODE
+    ? "not applicable (read-only demo)"
+    : DEMO_ESTIMATE_MODE
+      ? `${formatBaseUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (demo floor)`
     : quoteIsFresh && quote.protectedQuote.status === "available"
       ? (() => {
           const minimum = calculateMinimumOutput(
@@ -128,7 +137,7 @@ export default function TradePage() {
       ? "not loaded"
       : `${quote.quoteAgeSeconds}s`;
 
-  const priceImpact = SEPOLIA_DEMO_MODE
+  const priceImpact = DEMO_ESTIMATE_MODE
     ? "estimate only (demo)"
     : quoteIsFresh && quote.protectedQuote.status === "available"
       ? "from protected pool quote"
@@ -158,7 +167,7 @@ export default function TradePage() {
           inputAmount={inputAmount}
           inputBalance={inputTokenBalance}
           swapTokens={SWAP_TOKENS}
-          demoMode={SEPOLIA_DEMO_MODE}
+          demoMode={DEMO_ESTIMATE_MODE}
           demoEstimateBaseUnits={demoEstimateBaseUnits}
           quoteIsFresh={quoteIsFresh}
           protectedQuote={quote.protectedQuote}
@@ -254,13 +263,19 @@ export default function TradePage() {
           >
             {primaryStep === "check"
               ? policy.isPreviewingRisk
-                ? "Checking protection..."
-                : "Check protection"
+                ? READ_ONLY_DEMO_MODE
+                  ? "Calculating demo preview..."
+                  : "Checking protection..."
+                : READ_ONLY_DEMO_MODE
+                  ? "Check demo estimate"
+                  : "Check protection"
               : policy.isCreatingPolicy
                 ? "Signing policy..."
-                : "Sign policy and swap"}
+                : READ_ONLY_DEMO_MODE
+                  ? "Demo preview complete"
+                  : "Sign policy and swap"}
           </Button>
-          {policy.policy?.registered && (
+          {policy.policy?.registered && !READ_ONLY_DEMO_MODE && (
             <Button
               variant="primary"
               wide
@@ -291,6 +306,17 @@ export default function TradePage() {
             </RiskCallout>
           </div>
         )}
+        {policy.policy?.registered && executionChecklist.length > 0 && (
+          <div className="callout-slot" aria-live="polite">
+            <RiskCallout heading="Still needed before execution">
+              <ul>
+                {executionChecklist.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </RiskCallout>
+          </div>
+        )}
 
         <p className="note" role="status" aria-live="polite">
           {policy.actionStatus}
@@ -300,10 +326,12 @@ export default function TradePage() {
       <ShieldReport
         phase={phase}
         notice={
-          SEPOLIA_DEMO_MODE ? (
+          DEMO_ESTIMATE_MODE ? (
             <RiskCallout heading="Demo estimate">
               Demo estimate assumes {DEMO_USDC_PER_WETH.toString()} USDC per
-              WETH. The signed minimum is 1 base unit only.
+              WETH. {READ_ONLY_DEMO_MODE
+                ? "No policy is signed or swap executed."
+                : "The signed minimum is 1 base unit only."}
             </RiskCallout>
           ) : undefined
         }

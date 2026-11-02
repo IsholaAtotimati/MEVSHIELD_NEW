@@ -3,6 +3,7 @@ cache/
 out/
 node_modules/
 backend/dist/
+/backend/.local-demo/
 
 # Ignores development broadcast logs
 !/broadcast

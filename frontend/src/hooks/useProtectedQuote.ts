@@ -26,6 +26,7 @@ export function useProtectedQuote() {
     status: "unavailable",
     reason: "not-checked",
   });
+  const [poolSnapshot, setPoolSnapshot] = useState<ProtectedPoolSnapshot | null>(null);
   const [quoteClockMs, setQuoteClockMs] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [backendPoolKeyVerified, setBackendPoolKeyVerified] = useState(false);
@@ -39,11 +40,13 @@ export function useProtectedQuote() {
     // the unconfigured state into an explicit reason.
     if (SWAP_POOL_ID === null || SWAP_POOL_EXPECTATION === null) {
       setProtectedQuote({ status: "unavailable", reason: "not-checked" });
+      setPoolSnapshot(null);
       setQuoteClockMs(Date.now());
       return;
     }
     const poolId = SWAP_POOL_ID;
 
+    let observedSnapshot: ProtectedPoolSnapshot | null = null;
     const quote = await loadProtectedPoolQuote(async () => {
       const slots = poolStateSlots(poolId);
       const blockNumber = await publicClient.getBlockNumber();
@@ -99,9 +102,11 @@ export function useProtectedQuote() {
         ...poolState,
         observedAtMs: Date.now(),
       };
+      observedSnapshot = snapshot;
       return snapshot;
     }, SWAP_POOL_EXPECTATION);
     setProtectedQuote(quote);
+    setPoolSnapshot(observedSnapshot);
     setQuoteClockMs(Date.now());
   }, []);
 
@@ -144,6 +149,7 @@ export function useProtectedQuote() {
 
   return {
     protectedQuote,
+    poolSnapshot,
     setProtectedQuote,
     quoteClockMs,
     setQuoteClockMs,

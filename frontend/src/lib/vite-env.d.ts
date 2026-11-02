@@ -16,13 +16,15 @@ interface Window {
  * deployment.
  */
 interface ImportMetaEnv {
-  /** Base URL for backend calls. Default `http://localhost:4000`. */
+  /** Backend URL. Defaults to localhost only in Vite development mode. */
   readonly VITE_API_URL?: string;
   /**
    * Opt-in flag for the deterministic demo estimate path. Requires the Vite dev
    * server on Sepolia; also allowed from a built bundle on the local chain.
    */
   readonly VITE_SEPOLIA_DEMO_MODE?: string;
+  /** Production Sepolia estimate and risk-preview-only demo. */
+  readonly VITE_READ_ONLY_DEMO_MODE?: string;
   /** The explicit deployment-verification assertion. Leave unset. */
   readonly VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED?: string;
   /**

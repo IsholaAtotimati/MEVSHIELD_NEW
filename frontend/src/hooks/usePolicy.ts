@@ -1,15 +1,16 @@
 import { useCallback, useState } from "react";
 import type { Address, Hex } from "viem";
+import { TickMath } from "@uniswap/v3-sdk";
 
 import {
   BACKEND_URL,
+  DEMO_ESTIMATE_MODE,
   MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
+  READ_ONLY_DEMO_MODE,
   SEPOLIA_DEMO_MODE,
 } from "../config/env";
 import { buildPolicyExpiry } from "../config/policy";
 import {
-  MIN_SQRT_PRICE_LIMIT_X96,
-  MAX_SQRT_PRICE_LIMIT_X96,
   SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
   type TokenSymbol,
@@ -25,6 +26,7 @@ import {
   DEMO_MIN_AMOUNT_OUT,
   isFreshDemoPoolReadiness,
   type ProtectedQuote,
+  type ProtectedPoolSnapshot,
 } from "../lib/protectedQuote";
 import { createRequestId, logFrontend, safeError } from "../lib/observability";
 import { readRegisteredPolicy } from "../lib/policyReads";
@@ -44,6 +46,7 @@ type UsePolicyArgs = {
   zeroForOne: boolean | null;
   slippageBps: number;
   protectedQuote: ProtectedQuote;
+  poolSnapshot: ProtectedPoolSnapshot | null;
   quoteIsFresh: boolean;
   demoEstimateReady: boolean;
   quoteClockMs: number;
@@ -171,6 +174,13 @@ export function usePolicy(args: UsePolicyArgs) {
   }, [loadPolicyById, policyId]);
 
   const createPolicy = useCallback(async () => {
+    if (READ_ONLY_DEMO_MODE) {
+      setActionStatus(
+        "Policy signing is disabled in the hosted read-only demo.",
+      );
+      return;
+    }
+
     const {
       zeroForOne,
       inputAmountBaseUnits,
@@ -203,8 +213,9 @@ export function usePolicy(args: UsePolicyArgs) {
             minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
             authorizationVerified,
             policyBoundsVerified: false,
-            demoMode: SEPOLIA_DEMO_MODE,
+            demoMode: DEMO_ESTIMATE_MODE,
             demoEstimateAvailable: demoEstimateReady,
+            readOnlyDemo: READ_ONLY_DEMO_MODE,
           });
 
     if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
@@ -214,14 +225,30 @@ export function usePolicy(args: UsePolicyArgs) {
     if (!swapReadiness || !swapReadiness.canCheckRisk || zeroForOne === null) {
       setActionStatus(
         SEPOLIA_DEMO_MODE
-          ? "Demo policy creation requires the local backend and verified Sepolia deployment checks."
+          ? "Demo policy creation requires the local demo backend and fresh pool/protocol checks."
           : "Risk checking is unavailable until a fresh quote for the verified protected pool and matching backend configuration exist.",
       );
       return;
     }
 
+    const { poolSnapshot } = args;
+    if (!poolSnapshot) {
+      setActionStatus("A protected-pool snapshot is required before policy signing.");
+      return;
+    }
+
     // Narrowed once, after the guards above.
     const { poolId, poolKey } = SWAP_POOL_CONFIGURATION;
+
+    const limitTick = poolSnapshot.currentTick + (zeroForOne ? -599 : 599);
+    if (limitTick < -887272 || limitTick > 887272) {
+      setActionStatus("The calculated price limit is outside the supported tick range.");
+      return;
+    }
+
+    const sqrtPriceLimitX96 = BigInt(
+      TickMath.getSqrtRatioAtTick(limitTick).toString(),
+    ).toString();
 
     setIsCreatingPolicy(true);
     clearPolicyState();
@@ -230,9 +257,6 @@ export function usePolicy(args: UsePolicyArgs) {
     const amountBaseUnits = inputAmountBaseUnits;
     const amountSpecified =
       amountBaseUnits === null ? null : -amountBaseUnits;
-    const sqrtPriceLimitX96 = (
-      zeroForOne ? MIN_SQRT_PRICE_LIMIT_X96 : MAX_SQRT_PRICE_LIMIT_X96
-    ).toString();
 
     logFrontend("swap_started", {
       requestId,

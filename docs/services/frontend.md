@@ -117,9 +117,9 @@ Inputs:
 | `policyBoundsVerified` | A registered policy with decimal-string bounds |
 | `demoMode`, `demoEstimateAvailable` | Demo configuration and the fixed-rate estimate |
 
-`canCheckRisk` is the conjunction of the first eight, with the output-estimate term satisfied either by a fresh quote or, in demo mode, by a demo estimate. `canExecute` is `canCheckRisk` and `policyBoundsVerified`. Every failed input also appends a human-readable reason, which the trade page renders as a checklist ([frontend/src/pages/TradePage.tsx:218](../../frontend/src/pages/TradePage.tsx#L218)).
+`canCheckRisk` requires a positive amount, a supported pool key, backend/protocol/authorization checks, and an output estimate. The estimate can be a fresh quote or, in demo mode, a fresh pool inspection plus the fixed demo estimate. Demo mode also bypasses minimum-output deployment verification because it signs a 1-base-unit floor; it is for test-token flow checks only. `canExecute` additionally requires registered policy bounds. Signing blockers and execution blockers are displayed separately.
 
-`VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` is `false` in the committed example environment ([frontend/.env.example:5](../../frontend/.env.example#L5)). While it is false, `canCheckRisk` is false, `canExecute` is false, and the trade page cannot progress past the amount field. This is the intended state described in [ADR 0005](../decisions/0005-execute-gate-stays-closed.md).
+`VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` is `false` in the committed example environment ([frontend/.env.example:5](../../frontend/.env.example#L5)). Normal mode remains closed while it is false. Explicit demo mode is a development/local-only exception; it does not provide meaningful minimum-output protection. The normal deployment gate remains as described in [ADR 0005](../decisions/0005-execute-gate-stays-closed.md).
 
 ### Stage 4: re-checks at click time
 
@@ -194,7 +194,11 @@ npm run lint    # oxlint
 npm run build   # tsc -b && vite build
 ```
 
-`npm run demo` runs Vite in the `demo` mode. Demo mode still requires `VITE_SEPOLIA_DEMO_MODE=true`. On Sepolia it also requires the Vite dev server, so a production Sepolia bundle stays off that path. On chain 31337 a production bundle may use the deterministic estimate. See `resolveDemoMode` in `frontend/src/config/chainEnv.ts`.
+`npm run demo` runs the local interactive demo and still requires
+`VITE_SEPOLIA_DEMO_MODE=true`; Sepolia signing demo remains dev-server-only.
+For a deployed site, use `VITE_READ_ONLY_DEMO_MODE=true` instead. It enables
+the fixed estimate and risk preview only; the UI blocks signing and execution.
+See the [hosted demo deployment runbook](../runbook/hosted-demo-deployment.md).
 
 ## Related pages
 

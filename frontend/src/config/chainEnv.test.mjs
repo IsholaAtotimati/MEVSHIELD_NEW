@@ -17,6 +17,7 @@ import {
   resolveChainName,
   resolveExplorerUrl,
   resolveDemoMode,
+  resolveReadOnlyDemoMode,
   resolvePoolTokenAddresses,
   resolveRpcUrl,
 } from "./chainEnv.ts";
@@ -251,5 +252,26 @@ test("a chain that is neither Sepolia nor local follows the dev-server rule", ()
   assert.equal(
     resolveDemoMode({ chainId: 8453, devBuild: true, flagValue: "true" }),
     true,
+  );
+});
+
+test("read-only demo is enabled only for production Sepolia builds with explicit opt-in", () => {
+  const config = {
+    chainId: SEPOLIA_CHAIN_ID,
+    devBuild: false,
+    flagValue: "true",
+  };
+  assert.equal(resolveReadOnlyDemoMode(config), true);
+  assert.equal(
+    resolveReadOnlyDemoMode({ ...config, flagValue: "false" }),
+    false,
+  );
+  assert.equal(
+    resolveReadOnlyDemoMode({ ...config, devBuild: true }),
+    false,
+  );
+  assert.equal(
+    resolveReadOnlyDemoMode({ ...config, chainId: LOCAL_CHAIN_ID }),
+    false,
   );
 });

@@ -7,7 +7,12 @@ import {
   type ReactNode,
 } from "react";
 
-import { MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED, SEPOLIA_DEMO_MODE } from "../config/env";
+import {
+  DEMO_ESTIMATE_MODE,
+  MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
+  READ_ONLY_DEMO_MODE,
+  SEPOLIA_DEMO_MODE,
+} from "../config/env";
 import {
   SWAP_POOL_CONFIGURATION,
   SWAP_TOKENS,
@@ -82,7 +87,7 @@ function useTradeState() {
       : null;
   const quoteIsFresh = quoteHook.isQuoteFresh(inputAmountBaseUnits);
   const demoEstimateBaseUnits =
-    SEPOLIA_DEMO_MODE && inputAmountBaseUnits !== null && zeroForOne !== null
+    DEMO_ESTIMATE_MODE && inputAmountBaseUnits !== null && zeroForOne !== null
       ? calculateDemoOutput(inputAmountBaseUnits, zeroForOne)
       : null;
   const demoEstimateReady =
@@ -99,6 +104,7 @@ function useTradeState() {
     zeroForOne,
     slippageBps,
     protectedQuote: quoteHook.protectedQuote,
+    poolSnapshot: quoteHook.poolSnapshot,
     quoteIsFresh,
     demoEstimateReady,
     quoteClockMs: quoteHook.quoteClockMs,
@@ -129,8 +135,9 @@ function useTradeState() {
           minimumOutputProtocolVerified: MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
           authorizationVerified: protocol.hasAuthorization,
           policyBoundsVerified,
-          demoMode: SEPOLIA_DEMO_MODE,
+          demoMode: DEMO_ESTIMATE_MODE,
           demoEstimateAvailable: demoEstimateReady,
+          readOnlyDemo: READ_ONLY_DEMO_MODE,
         });
 
   /**
@@ -148,6 +155,7 @@ function useTradeState() {
       : {
           canCheckRisk: false,
           canExecute: false,
+          executionReasons: baseSwapReadiness?.executionReasons ?? [],
           reasons: [
             ...(SWAP_POOL_CONFIGURATION.status === "unconfigured"
               ? [SWAP_POOL_CONFIGURATION.message]

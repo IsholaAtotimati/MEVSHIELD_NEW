@@ -2,7 +2,9 @@
 
 The backend exposes five routes. All are under the same Express app and all accept and return JSON. There is no API version prefix, no API key, and no caller authentication on any route.
 
-Base URL: the value of `VITE_API_URL` in the frontend, defaulting to `http://localhost:4000`. In production it is the Railway service host.
+Base URL: the value of `VITE_API_URL` in the frontend. It defaults to
+`http://localhost:4000` only during Vite development; production builds have no
+localhost fallback and must set it to the Railway service host.
 
 Source: [backend/src/server.ts](../../backend/src/server.ts).
 

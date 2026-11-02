@@ -119,12 +119,16 @@ unconfigured and names the missing variables rather than guessing.
 
 This is the interesting one, and the reason this runbook exists.
 
-**On Sepolia: flag only, fail-closed.** The v2 minimum-output path (hook, router,
+**Normal mode: flag only, fail-closed.** The v2 minimum-output path (hook, router,
 policy authorization) is trusted only after its deployed bytecode has been
 checked. That deployment is somebody else's, and the app cannot audit it, so
 the only honest answer is a human assertion in the build:
 `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED=true`. It defaults to false. This is
-unchanged, and nothing in the local work loosens it.
+required outside demo mode.
+
+Explicit demo mode bypasses this gate only in a Vite development build or the
+local 31337 stack. It uses a 1-base-unit minimum and is not safe for value-bearing
+trades. It exists only to exercise policy signing and transaction flow.
 
 **On chain 31337: verified by comparison.** Here the addresses the app reads are
 the ones this machine's own deploy script wrote minutes earlier, and
@@ -158,9 +162,10 @@ requires `VITE_SEPOLIA_DEMO_MODE=true` and:
 See `resolveDemoMode` in
 [frontend/src/config/chainEnv.ts](../../frontend/src/config/chainEnv.ts).
 
-The demo policy carries a **1-base-unit** minimum output. That is not slippage
-protection and the UI says so on the page. It exists so the policy signing,
-registration and authorization paths can be exercised end to end.
+The demo policy carries a **1-base-unit** minimum output and demo mode bypasses
+deployment verification. That is not slippage protection; the UI warns that
+demo swaps are not protected. It exists so the policy signing, registration and
+authorization paths can be exercised end to end.
 
 ### Gate 4 — `backendPoolKeyVerified`
 
@@ -191,17 +196,14 @@ the hook will later consume from.
 > signature check. Policy creation could never have worked locally. The script
 > now matches Sepolia. See section 6.
 
-### Gate 7 — `policyBoundsVerified` (the one that stays closed)
+### Gate 7 — `policyBoundsVerified` (closed until a policy is registered)
 
-**Closed at first, by design.** No policy exists yet, so there are no registered
-bounds to verify. This is why the checklist still shows
+**Closed before registration, by design.** No policy exists yet, so there are
+no registered bounds to verify. It is an execution blocker, not a signing
+blocker, and appears in a separate checklist only after registration.
 
-> Registered policy bounds are not verified.
-
-with an amount entered, and why the button reads **Check protection** rather
-than **Sign policy and swap**. It blocks `canExecute`, not `canCheckRisk`. Once
-a policy registers, the bounds come from the on-chain policy and the gate
-recomputes.
+After a policy registers, readiness recomputes and the execute button becomes
+available when the returned policy bounds are valid.
 
 ---
 
@@ -228,9 +230,9 @@ With the stack up and the script run:
 Step 6 needs a wallet. Steps 1, 3, 4 and 5 do not: the readiness gate is
 rendered from the same state either way.
 
-The **Execute** button may still be disabled. That is the `canExecute` path,
-which additionally requires `policyBoundsVerified` and is out of scope for this
-runbook. Registration is the end of the flow this runbook claims.
+The **Execute demo swap** button becomes available after registration. Do not
+use it with value-bearing tokens: demo mode uses a 1-base-unit minimum and
+provides no meaningful output protection. This runbook validates wiring only.
 
 ---
 
@@ -298,8 +300,9 @@ The deploy script now matches Sepolia. Two consequences worth knowing:
 
 - **No live quote.** There is no quoter. Demo mode is an estimate and the UI
   says so. Gate 3 opens only through the demo path.
-- **Execution is out of scope.** `canExecute` needs `policyBoundsVerified` and a
-  matching policy; the Execute button is left to the execute-gate ADR.
+- **Demo execution is not a security test.** It uses a 1-base-unit minimum.
+  `canExecute` checks the registered policy fields, but a demo pass does not
+  certify Sepolia deployment behavior.
 - **This runbook does not certify Sepolia.** Locally the tokens are 18-decimal
   mocks, the signer is `0xA11CE`, and there is no Permit2. A pass here says the
   application wiring works, not that a Sepolia swap will.

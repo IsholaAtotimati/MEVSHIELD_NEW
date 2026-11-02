@@ -6,7 +6,7 @@ Accepted. Currently in effect. `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` is `
 
 ## Context
 
-The UI has one flag that opens the path from readiness to signing and execution. Until it is true, `calculateSwapReadiness` cannot return `canCheckRisk` or `canExecute`, so the trade page cannot submit anything.
+The normal UI path has one flag that opens signing and execution. Until it is true, `calculateSwapReadiness` cannot return `canCheckRisk` or `canExecute`, so normal-mode trade submission stays closed.
 
 The question is what evidence would justify setting it true.
 
@@ -34,6 +34,8 @@ The suite exists and is written for exactly this purpose. It contains two tests:
 
 Until that run passes and its output is recorded, `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` stays unset or false, and the UI execute path stays unreachable.
 
+An explicit demo-mode exception is available only in the gated development/local build. It bypasses deployment verification to exercise signing and execution with a 1-base-unit minimum output. This is not a protected trade and must never be used with value-bearing tokens.
+
 The same condition applies to opening the backend signing gate, since a signature is useless without an executable path and the signing route is unauthenticated.
 
 ## Consequences
@@ -47,7 +49,7 @@ Benefits:
 
 Costs:
 
-- The product cannot execute a protected swap through its own UI in its current state, on any branch, regardless of configuration.
+- The product cannot execute a normal protected swap through its own UI until the deployment test passes. Demo mode can exercise the mechanics but does not provide meaningful minimum-output protection.
 - The gate does not prevent a determined user from bypassing the UI. A valid signed policy can be submitted directly to the router, and a direct `PoolManager.swap` skips the router checks entirely. The gate is a product control, not a security control.
 - The condition is unreachable without access to the signer key, which means the decision rests on a party who holds it. Until then the gate stays closed by default, which is the safe failure mode but also a permanent block.
 - A passing run at one block does not guarantee behaviour later. The gate should be re-run after any contract change, and the result recorded.

@@ -284,7 +284,7 @@ test("keeps risk and execution disabled until v2 minimum-output contracts are ve
   assert.match(readiness.reasons.join(" "), /minimum-output v2 contracts/);
 });
 
-test("demo mode can proceed without a market quote only when demo estimate and deployment checks pass", () => {
+test("demo mode can proceed without a market quote or deployment flag when its estimate is fresh", () => {
   const readiness = calculateSwapReadiness({
     amountInBaseUnits: 1n,
     quote: { status: "unavailable", reason: "quote-simulation-unavailable" },
@@ -295,12 +295,50 @@ test("demo mode can proceed without a market quote only when demo estimate and d
     poolKeyMatches: true,
     backendPoolKeyVerified: true,
     protocolAddressesVerified: true,
-    minimumOutputProtocolVerified: true,
+    minimumOutputProtocolVerified: false,
     authorizationVerified: true,
     policyBoundsVerified: false,
   });
   assert.equal(readiness.canCheckRisk, true);
   assert.equal(readiness.canExecute, false);
+  assert.equal(readiness.reasons.some((reason) => /minimum-output v2/.test(reason)), false);
+  assert.deepEqual(readiness.executionReasons, [
+    "Registered policy bounds are not verified.",
+  ]);
+  const registeredReadiness = calculateSwapReadiness({
+    amountInBaseUnits: 1n,
+    quote: { status: "unavailable", reason: "quote-simulation-unavailable" },
+    nowMs: now,
+    demoMode: true,
+    demoEstimateAvailable: true,
+    poolId,
+    poolKeyMatches: true,
+    backendPoolKeyVerified: true,
+    protocolAddressesVerified: true,
+    minimumOutputProtocolVerified: false,
+    authorizationVerified: true,
+    policyBoundsVerified: true,
+  });
+  assert.equal(registeredReadiness.canExecute, true);
+  assert.deepEqual(registeredReadiness.executionReasons, []);
+
+  const readOnlyDemo = calculateSwapReadiness({
+    amountInBaseUnits: 1n,
+    quote: { status: "unavailable", reason: "quote-simulation-unavailable" },
+    nowMs: now,
+    demoMode: true,
+    demoEstimateAvailable: true,
+    poolId,
+    poolKeyMatches: true,
+    backendPoolKeyVerified: true,
+    protocolAddressesVerified: true,
+    minimumOutputProtocolVerified: false,
+    authorizationVerified: true,
+    policyBoundsVerified: true,
+    readOnlyDemo: true,
+  });
+  assert.equal(readOnlyDemo.canCheckRisk, true);
+  assert.equal(readOnlyDemo.canExecute, false);
 
   const missingDemoEstimate = calculateSwapReadiness({
     amountInBaseUnits: 1n,

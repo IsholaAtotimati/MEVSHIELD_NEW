@@ -62,6 +62,22 @@ export function resolveDemoMode(input: {
 }
 
 /**
+ * Enables the estimate/preview-only demo in a deployed Sepolia frontend.
+ * This mode never permits policy signing or swap execution.
+ */
+export function resolveReadOnlyDemoMode(input: {
+  chainId: number;
+  devBuild: boolean;
+  flagValue: string | undefined;
+}): boolean {
+  return (
+    input.chainId === SEPOLIA_CHAIN_ID &&
+    !input.devBuild &&
+    readEnvValue(input.flagValue) === "true"
+  );
+}
+
+/**
  * Parses a chain id.
  *
  * Accepts decimal digits only. A hex string, a negative number, a float or

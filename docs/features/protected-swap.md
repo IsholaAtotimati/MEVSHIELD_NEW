@@ -42,7 +42,7 @@ Both legs of the pool are ERC-20. The "ETH" entry in the token selector is WETH9
 | Route authorization verified | True when the registry consumer equals the authorization contract | Blocks on a mismatch |
 | Policy bounds verified | Only after a registered policy exists | Blocks `canExecute` until a policy is registered |
 
-Two of these are structurally closed: the quote gate, because no quoter exists, and the deployment-verified flag, because it is set to false on purpose. Demo mode substitutes a fixed-rate estimate for the quote but does not substitute for the deployment flag.
+The quote gate is structurally closed outside demo mode because no quoter exists. Explicit demo mode substitutes a fixed-rate estimate and bypasses the deployment-verified flag so the flow can be exercised; it signs a 1-base-unit minimum and is not safe for value-bearing trades. Normal mode remains fail-closed.
 
 ## Enforcement on the execution path
 
@@ -64,7 +64,7 @@ The last row is not a measurement. See [overview](../architecture/overview.md#wh
 
 ## Known limitations
 
-- **The UI cannot currently execute.** `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` is false, and no quote can be produced, so `canExecute` is false for both reasons. This is documented as intentional in [ADR 0005](../decisions/0005-execute-gate-stays-closed.md).
+- **Normal mode cannot currently execute.** `VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED` is false and no quote can be produced. Explicit demo mode can exercise the transaction path with a 1-base-unit minimum, but that is not meaningful output protection. The normal-mode gate is documented in [ADR 0005](../decisions/0005-execute-gate-stays-closed.md).
 - **Direct PoolManager swaps bypass the router.** The hook address is mined for `beforeSwap` only. A caller calling `PoolManager.swap` with valid `hookData` passes the hook but skips the realized-minimum-output check and the tick cap. The router checks protect users of the router.
 - **`maxLoss` and `maxFee` are not enforced against reality.** They are compared to caller-supplied integers excluded from the signature.
 - **Payer and recipient are outside the policy.** The signed struct has no field for either. The router pays from `msg.sender` and sends output to a separate `recipient` argument.
@@ -78,7 +78,7 @@ The last row is not a measurement. See [overview](../architecture/overview.md#wh
 
 Demo mode replaces the quote with a fixed 2000 USDC per WETH estimate and replaces the minimum output with 1 base unit. It is gated on all of: `VITE_SEPOLIA_DEMO_MODE=true`, `import.meta.env.DEV`, `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true` in the backend, `NODE_ENV` not `production`, the backend URL being local, and `RAILWAY_ENVIRONMENT_NAME` being unset. A banner states that the estimates are not live ([frontend/src/layout/DemoBanner.tsx:4](../../frontend/src/layout/DemoBanner.tsx#L4)).
 
-Demo mode still does not satisfy the deployment-verified flag, so even in demo mode the execute button is disabled.
+Demo mode bypasses deployment verification only in its gated development/local builds. It still requires a fresh initialized-pool check, matching backend configuration, matching protocol addresses, and verified route authorization. The execute button can be used to exercise the test flow, but its 1-base-unit minimum is not meaningful protection.
 
 ## Related pages
 

@@ -25,6 +25,7 @@ export type ProtectedPoolSnapshot = {
   hookHasCode: boolean;
   poolId: Hex;
   sqrtPriceX96: bigint;
+  currentTick: number;
   activeLiquidity: bigint;
   observedAtMs: number;
 };
@@ -101,6 +102,7 @@ export function matchesBackendProtectedPoolConfig(
 export type SwapReadiness = {
   canCheckRisk: boolean;
   canExecute: boolean;
+  executionReasons: string[];
   reasons: string[];
 };
 
@@ -322,6 +324,7 @@ export function calculateSwapReadiness(input: {
   minimumOutputProtocolVerified: boolean;
   authorizationVerified: boolean;
   policyBoundsVerified: boolean;
+  readOnlyDemo?: boolean;
 }): SwapReadiness {
   const reasons: string[] = [];
   const quoteFresh = isFreshQuote(
@@ -335,6 +338,11 @@ export function calculateSwapReadiness(input: {
   const outputEstimateReady = input.demoMode
     ? input.demoEstimateAvailable === true
     : quoteFresh;
+  // Demo mode is an explicit, development-only opt-in and signs a 1-unit
+  // minimum. Keep the normal path fail-closed when deployment verification is
+  // absent; demo mode is only for exercising the flow with test tokens.
+  const minimumOutputProtocolReady =
+    input.minimumOutputProtocolVerified || input.demoMode === true;
 
   if (!positiveAmount) reasons.push("Enter a valid positive input amount.");
   if (!input.poolKeyMatches) reasons.push("The configured protected pool key is invalid.");
@@ -347,7 +355,7 @@ export function calculateSwapReadiness(input: {
   }
   if (!input.backendPoolKeyVerified) reasons.push("The backend pool-key configuration is unverified.");
   if (!input.protocolAddressesVerified) reasons.push("The Sepolia verifier or signer configuration is unverified.");
-  if (!input.minimumOutputProtocolVerified) reasons.push("The signed-minimum-output v2 contracts are not deployed and verified.");
+  if (!minimumOutputProtocolReady) reasons.push("The signed-minimum-output v2 contracts are not deployed and verified.");
   if (!input.authorizationVerified) reasons.push("The protected route authorization is unverified.");
 
   const canCheckRisk =
@@ -356,13 +364,17 @@ export function calculateSwapReadiness(input: {
     outputEstimateReady &&
     input.backendPoolKeyVerified &&
     input.protocolAddressesVerified &&
-    input.minimumOutputProtocolVerified &&
+    minimumOutputProtocolReady &&
     input.authorizationVerified;
-  if (!input.policyBoundsVerified) reasons.push("Registered policy bounds are not verified.");
+  const executionReasons = input.policyBoundsVerified
+    ? []
+    : ["Registered policy bounds are not verified."];
 
   return {
     canCheckRisk,
-    canExecute: canCheckRisk && input.policyBoundsVerified,
+    canExecute:
+      !input.readOnlyDemo && canCheckRisk && input.policyBoundsVerified,
+    executionReasons,
     reasons,
   };
 }
@@ -379,10 +391,16 @@ export function poolStateSlots(poolId: Hex): { slot0: Hex; liquidity: Hex } {
 
 export function decodePoolState(slot0: Hex, liquidity: Hex): {
   sqrtPriceX96: bigint;
+  currentTick: number;
   activeLiquidity: bigint;
 } {
+  const packedSlot0 = BigInt(slot0);
+  const rawTick = Number((packedSlot0 >> 160n) & ((1n << 24n) - 1n));
+  const currentTick = rawTick >= (1 << 23) ? rawTick - (1 << 24) : rawTick;
+
   return {
-    sqrtPriceX96: BigInt(slot0) & ((1n << 160n) - 1n),
+    sqrtPriceX96: packedSlot0 & ((1n << 160n) - 1n),
+    currentTick,
     activeLiquidity: BigInt(liquidity) & ((1n << 128n) - 1n),
   };
 }

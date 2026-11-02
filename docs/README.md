@@ -82,6 +82,7 @@ Status vocabulary:
 | [runbook/how-to-test.md](runbook/how-to-test.md) | The three commands a lead runs, and what a pass looks like |
 | [runbook/local-docker.md](runbook/local-docker.md) | Bringing the whole stack up locally in Docker against anvil: the images, the compose services, the deploy and seed scripts, the verification script, and the ports |
 | [runbook/local-test-flow.md](runbook/local-test-flow.md) | The chain 31337 page through policy registration |
+| [runbook/hosted-demo-deployment.md](runbook/hosted-demo-deployment.md) | Deploy the read-only Sepolia demo to Railway and Vercel |
 | [runbook/sepolia-fork-sandwich.md](runbook/sepolia-fork-sandwich.md) | The fork proof that a worse fill reverts in this repository's router |
 | [reviews/changelog-since-8a676f6d.md](reviews/changelog-since-8a676f6d.md) | What landed after the student's last commit |
 

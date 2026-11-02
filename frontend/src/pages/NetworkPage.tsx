@@ -9,7 +9,7 @@ import { CHAIN_NAME } from "../config/chain";
 import {
   MINIMUM_OUTPUT_V2_DEPLOYMENT_UNVERIFIED_REASON,
   MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED,
-  SEPOLIA_DEMO_MODE,
+  DEMO_ESTIMATE_MODE,
 } from "../config/env";
 import { useTrade } from "../context/TradeContext";
 import { CONTRACTS } from "../lib/contracts";
@@ -150,7 +150,7 @@ export default function NetworkPage() {
           </p>
         )}
         <StatLine label="Demo estimate">
-          {SEPOLIA_DEMO_MODE ? "on" : "off"}
+          {DEMO_ESTIMATE_MODE ? "on" : "off"}
         </StatLine>
       </Card>
 

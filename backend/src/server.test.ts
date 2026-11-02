@@ -95,6 +95,7 @@ async function requestJson(
   method: string,
   path: string,
   body?: unknown,
+  extraHeaders: Record<string, string> = {},
 ): Promise<{ status: number; json: Record<string, unknown>; headers: Headers }> {
   const server = createServer(app);
   server.listen(0, "127.0.0.1");
@@ -106,7 +107,10 @@ async function requestJson(
   try {
     const response = await fetch(url, {
       method,
-      headers: body ? { "content-type": "application/json" } : undefined,
+      headers: {
+        ...extraHeaders,
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
     const json = (await response.json()) as Record<string, unknown>;
@@ -117,6 +121,28 @@ async function requestJson(
     });
   }
 }
+
+test("CORS accepts only the configured comma-separated frontend origins", async () => {
+  const app = createApp(
+    baseDeps({
+      frontendUrl:
+        "https://mevshield-demo.vercel.app, https://preview.example.test",
+    }),
+  );
+  const allowed = await requestJson(app, "GET", "/health", undefined, {
+    Origin: "https://mevshield-demo.vercel.app",
+  });
+  const preview = await requestJson(app, "GET", "/health", undefined, {
+    Origin: "https://preview.example.test",
+  });
+  const rejected = await requestJson(app, "GET", "/health", undefined, {
+    Origin: "https://attacker.example",
+  });
+
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "https://mevshield-demo.vercel.app");
+  assert.equal(preview.headers.get("access-control-allow-origin"), "https://preview.example.test");
+  assert.equal(rejected.headers.get("access-control-allow-origin"), null);
+});
 
 test("GET /health exposes monitor last checked block", async () => {
   const response = await requestJson(createApp(baseDeps()), "GET", "/health");
