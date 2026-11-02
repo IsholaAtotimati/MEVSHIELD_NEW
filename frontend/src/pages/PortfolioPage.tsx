@@ -1,0 +1,338 @@
+import { useCallback, useEffect, useState } from "react";
+import type { Address } from "viem";
+
+import AllowanceCard from "../components/AllowanceCard";
+import Button from "../components/Button";
+import Card from "../components/Card";
+import Kicker from "../components/Kicker";
+import StatCard, { StatRow } from "../components/StatCard";
+import { TOKEN_NETWORK_LABEL } from "../config/chain";
+import { SWAP_POOL_CONFIGURATION, SWAP_TOKENS, WETH9_ADDRESS } from "../config/swapPool";
+import { useTrade } from "../context/TradeContext";
+import { erc20Abi, weth9Abi } from "../lib/abis";
+import { CONTRACTS } from "../lib/contracts";
+import { formatTokenAmount } from "../lib/format";
+import { parseTokenAmount } from "../lib/protectedQuote";
+import { getWalletClient, publicClient } from "../lib/viem";
+
+type AllowanceToken = "WETH" | "USDC";
+
+type AllowanceBalances = Record<AllowanceToken, bigint | null>;
+type AllowanceAmounts = Record<AllowanceToken, string>;
+
+const EMPTY_ALLOWANCES: AllowanceBalances = { WETH: null, USDC: null };
+
+/**
+ * The pool trades WETH, so the ETH entry in SWAP_TOKENS is the WETH token.
+ * Both addresses are `null` on a local build whose token addresses were not
+ * supplied; the page then reports the configuration error instead of reading
+ * from a placeholder.
+ */
+const ALLOWANCE_TOKENS: Record<
+  AllowanceToken,
+  { address: Address | null; decimals: number }
+> = {
+  WETH: { address: WETH9_ADDRESS, decimals: SWAP_TOKENS.ETH.decimals },
+  USDC: {
+    address: SWAP_TOKENS.USDC.address,
+    decimals: SWAP_TOKENS.USDC.decimals,
+  },
+};
+
+export default function PortfolioPage() {
+  const { wallet } = useTrade();
+  /**
+   * One message for every unconfigured path on this page, taken from the config
+   * module so the text is not restated per call site.
+   */
+  const unconfiguredMessage =
+    SWAP_POOL_CONFIGURATION.status === "unconfigured"
+      ? SWAP_POOL_CONFIGURATION.message
+      : "Pool token addresses are not configured.";
+  const [ethBalance, setEthBalance] = useState<bigint | null>(null);
+  const [wethBalance, setWethBalance] = useState<bigint | null>(null);
+  const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null);
+  const [allowances, setAllowances] =
+    useState<AllowanceBalances>(EMPTY_ALLOWANCES);
+  const [wrapAmount, setWrapAmount] = useState("");
+  const [approveAmounts, setApproveAmounts] = useState<AllowanceAmounts>({
+    WETH: "",
+    USDC: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("Connect a wallet to load balances.");
+
+  const refresh = useCallback(async () => {
+    if (!wallet.account) return;
+    const account = wallet.account;
+    // Without both token addresses there is nothing to read. Report the
+    // configuration error rather than querying an address that does not exist.
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    const wethAddress = SWAP_POOL_CONFIGURATION.token0;
+    const usdcAddress = SWAP_POOL_CONFIGURATION.token1;
+    const [eth, weth, usdc, wethAllowance, usdcAllowance] = await Promise.all([
+      publicClient.getBalance({ address: account }),
+      publicClient.readContract({
+        address: wethAddress,
+        abi: weth9Abi,
+        functionName: "balanceOf",
+        args: [account],
+      }),
+      publicClient.readContract({
+        address: usdcAddress,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [account],
+      }),
+      publicClient.readContract({
+        address: wethAddress,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [account, CONTRACTS.mevShieldRouter],
+      }),
+      publicClient.readContract({
+        address: usdcAddress,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [account, CONTRACTS.mevShieldRouter],
+      }),
+    ]);
+    setEthBalance(eth);
+    setWethBalance(weth);
+    setUsdcBalance(usdc);
+    setAllowances({ WETH: wethAllowance, USDC: usdcAllowance });
+    setStatus("Balances updated.");
+  }, [wallet.account]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function submit(
+    action: (account: `0x${string}`) => Promise<`0x${string}`>,
+    pendingMessage: string,
+    doneMessage: string,
+  ) {
+    if (!wallet.account || busy) return;
+    try {
+      setBusy(true);
+      await wallet.ensureSepolia();
+      setStatus(pendingMessage);
+      const hash = await action(wallet.account);
+      await publicClient.waitForTransactionReceipt({ hash });
+      setStatus(doneMessage);
+      await refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Transaction failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function wrapEth() {
+    const value = parseTokenAmount(wrapAmount || "0", 18);
+    if (value === null || value <= 0n) {
+      setStatus("Enter a positive ETH amount to wrap.");
+      return;
+    }
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    const wethAddress = SWAP_POOL_CONFIGURATION.token0;
+    void submit(
+      (account) =>
+        getWalletClient().writeContract({
+          address: wethAddress,
+          abi: weth9Abi,
+          functionName: "deposit",
+          value,
+          account,
+        }),
+      "Confirm wrap in your wallet...",
+      "Wrapped ETH to WETH.",
+    );
+  }
+
+  function unwrapWeth() {
+    const amount = parseTokenAmount(wrapAmount || "0", 18);
+    if (amount === null || amount <= 0n) {
+      setStatus("Enter a positive WETH amount to unwrap.");
+      return;
+    }
+    if (SWAP_POOL_CONFIGURATION.status === "unconfigured") {
+      setStatus(SWAP_POOL_CONFIGURATION.message);
+      return;
+    }
+    const wethAddress = SWAP_POOL_CONFIGURATION.token0;
+    void submit(
+      (account) =>
+        getWalletClient().writeContract({
+          address: wethAddress,
+          abi: weth9Abi,
+          functionName: "withdraw",
+          args: [amount],
+          account,
+        }),
+      "Confirm unwrap in your wallet...",
+      "Unwrapped WETH to ETH.",
+    );
+  }
+
+  function approveExact(symbol: AllowanceToken) {
+    const token = ALLOWANCE_TOKENS[symbol];
+    const amount = parseTokenAmount(
+      approveAmounts[symbol] || "0",
+      token.decimals,
+    );
+    if (amount === null) {
+      setStatus(`Enter a valid ${symbol} amount before approving.`);
+      return;
+    }
+    if (token.address === null) {
+      setStatus(unconfiguredMessage);
+      return;
+    }
+    void submit(
+      (account) =>
+        getWalletClient().writeContract({
+          address: token.address as Address,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [CONTRACTS.mevShieldRouter, amount],
+          account,
+        }),
+      "Confirm approval in your wallet...",
+      `Router allowance for ${symbol} updated.`,
+    );
+  }
+
+  function revoke(symbol: AllowanceToken) {
+    const token = ALLOWANCE_TOKENS[symbol];
+    if (token.address === null) {
+      setStatus(unconfiguredMessage);
+      return;
+    }
+    void submit(
+      (account) =>
+        getWalletClient().writeContract({
+          address: token.address as Address,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [CONTRACTS.mevShieldRouter, 0n],
+          account,
+        }),
+      "Confirm revoke in your wallet...",
+      `Router allowance for ${symbol} revoked.`,
+    );
+  }
+
+  return (
+    <div className="page-stack">
+      <header className="page-head">
+        <Kicker>Balances</Kicker>
+        <h1 className="page-title">Portfolio</h1>
+        <p className="addr">
+          {TOKEN_NETWORK_LABEL} ETH, WETH, and USDC. No USD values.
+        </p>
+      </header>
+
+      {!wallet.account ? (
+        <Card>
+          <div className="empty-state">
+            <p>Connect a wallet to load balances and allowances.</p>
+            <p className="note">
+              Use <strong>Connect wallet</strong> in the top bar. Balances and
+              allowances for the connected wallet appear here.
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <StatRow>
+            <StatCard
+              label="ETH (unwrapped)"
+              value={formatTokenAmount(ethBalance, 18)}
+            />
+            <StatCard
+              label="WETH (used by swaps)"
+              value={formatTokenAmount(wethBalance, 18)}
+            />
+            <StatCard label="USDC" value={formatTokenAmount(usdcBalance, 6)} />
+          </StatRow>
+
+          <div className="toolbar">
+            <span className="note">
+              Balances above are read from {TOKEN_NETWORK_LABEL} for the
+              connected wallet.
+            </span>
+            <Button variant="ghost" onClick={() => void refresh()}>
+              Refresh balances
+            </Button>
+          </div>
+
+          <div className="grid">
+            <Card
+              title="Wrap / unwrap"
+              footer="Trade spends WETH. Wrap before swapping if your WETH balance above is too low."
+            >
+              <label className="field" htmlFor="wrap-amount">
+                <span>Amount in ETH or WETH</span>
+                <input
+                  className="input"
+                  id="wrap-amount"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={wrapAmount}
+                  onChange={(event) => setWrapAmount(event.target.value)}
+                />
+              </label>
+              <div className="button-row">
+                <Button variant="ghost" disabled={busy} onClick={wrapEth}>
+                  Wrap ETH to WETH
+                </Button>
+                <Button variant="ghost" disabled={busy} onClick={unwrapWeth}>
+                  Unwrap WETH to ETH
+                </Button>
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid">
+            <AllowanceCard
+              symbol="WETH"
+              decimals={18}
+              allowance={allowances.WETH}
+              amount={approveAmounts.WETH}
+              busy={busy}
+              onAmountChange={(value) =>
+                setApproveAmounts((prev) => ({ ...prev, WETH: value }))
+              }
+              onApprove={() => approveExact("WETH")}
+              onRevoke={() => revoke("WETH")}
+            />
+            <AllowanceCard
+              symbol="USDC"
+              decimals={6}
+              allowance={allowances.USDC}
+              amount={approveAmounts.USDC}
+              busy={busy}
+              onAmountChange={(value) =>
+                setApproveAmounts((prev) => ({ ...prev, USDC: value }))
+              }
+              onApprove={() => approveExact("USDC")}
+              onRevoke={() => revoke("USDC")}
+            />
+          </div>
+
+          <p className="note" role="status" aria-live="polite">
+            {status}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}

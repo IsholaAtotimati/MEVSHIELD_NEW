@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ActivePoolState } from "./poolState.js";
 import { RiskPreviewRequestSchema, previewRisk } from "./riskPreview.js";
+
+const UNIT_SQRT_PRICE_X96 = 1n << 96n;
+
+const deepPool: ActivePoolState = {
+  sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+  liquidity: 10n ** 30n,
+  feePips: 3000n,
+};
 
 test("accepts a valid risk-preview request", () => {
   assert.equal(
@@ -27,45 +36,87 @@ test("rejects malformed, missing, or invalid fields", () => {
 });
 
 test("rejects zero amount", () => {
-  const result = previewRisk({ amountSpecified: "0", zeroForOne: true });
+  const result = previewRisk(
+    { amountSpecified: "0", zeroForOne: true },
+    deepPool,
+  );
   assert.deepEqual(result, {
     ok: false,
     error: "amountSpecified must not be zero",
   });
 });
 
-test("returns deterministic estimates for a valid amount", () => {
-  const result = previewRisk({
-    amountSpecified: "1000000000000000000",
-    zeroForOne: true,
-  });
+test("returns a pool-state price-impact estimate for a deep-pool trade", () => {
+  const result = previewRisk(
+    {
+      amountSpecified: "1000000000000000000",
+      zeroForOne: true,
+    },
+    deepPool,
+  );
 
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.data.estimatedLoss, "1000000000000000");
-  assert.equal(result.data.estimatedFee, "100000000000000");
-  assert.equal(result.data.maxLoss, "2000000000000000");
-  assert.equal(result.data.maxFee, "200000000000000");
+  assert.equal(result.data.estimatedLoss, "994010");
+  assert.equal(result.data.estimatedFee, "3000000000000000");
+  assert.equal(result.data.maxLoss, "1988020");
+  assert.equal(result.data.maxFee, "6000000000000000");
   assert.equal(result.data.riskLevel, "LOW");
-  assert.equal(result.data.model, "deterministic-mvp");
-  assert.match(result.data.disclaimer, /Not a live market-risk measurement/);
+  assert.equal(result.data.model, "active-liquidity-impact");
+  assert.match(
+    result.data.disclaimer,
+    /current pool state for this trade size/,
+  );
+  assert.doesNotMatch(result.data.disclaimer, /sandwich-attack probability/);
 });
 
-test("negative amounts produce the same absolute-amount estimates", () => {
-  const positive = previewRisk({
-    amountSpecified: "1000000",
-    zeroForOne: true,
-  });
-  const negative = previewRisk({
-    amountSpecified: "-1000000",
-    zeroForOne: false,
-  });
+test("the same absolute amount and direction produce the same estimate", () => {
+  const positive = previewRisk(
+    {
+      amountSpecified: "30501",
+      zeroForOne: true,
+    },
+    {
+      sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+      liquidity: 10_000_000n,
+      feePips: 0n,
+    },
+  );
+  const negative = previewRisk(
+    {
+      amountSpecified: "-30501",
+      zeroForOne: true,
+    },
+    {
+      sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+      liquidity: 10_000_000n,
+      feePips: 0n,
+    },
+  );
 
   assert.equal(positive.ok, true);
   assert.equal(negative.ok, true);
   if (positive.ok && negative.ok) {
     assert.equal(positive.data.estimatedLoss, negative.data.estimatedLoss);
     assert.equal(positive.data.estimatedFee, negative.data.estimatedFee);
+    assert.equal(positive.data.riskLevel, "MEDIUM");
+    assert.equal(negative.data.riskLevel, "MEDIUM");
   }
+});
+
+test("preview can return HIGH when liquidity cannot support the trade", () => {
+  const result = previewRisk(
+    { amountSpecified: "5000", zeroForOne: false },
+    {
+      sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+      liquidity: 1_000n,
+      feePips: 0n,
+    },
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.data.estimatedLoss, "5000");
+  assert.equal(result.data.riskLevel, "HIGH");
 });

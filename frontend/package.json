@@ -8,12 +8,13 @@
     "demo": "vite --mode demo",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs",
+    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/lib/networkVerification.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs src/lib/minimumOutputVerification.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.5",
     "viem": "^2.57.2"
   },
   "devDependencies": {

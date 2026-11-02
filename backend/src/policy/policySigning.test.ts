@@ -5,9 +5,10 @@ import {
   EXPECTED_PROTECTED_POOL,
   type ProtectedPoolConfig,
 } from "../config/runtimeConfig.js";
+import { POLICY_TYPES, policyDomain } from "./eip712.js";
 import type { Policy } from "./policy.js";
 import { signProtectedPolicy } from "./policySigning.js";
-import { signPolicy, getPolicyTypes } from "../signer/policySigner.js";
+import { signPolicy } from "../signer/policySigner.js";
 
 const wallet = new Wallet(
   "0x1111111111111111111111111111111111111111111111111111111111111111",
@@ -73,20 +74,18 @@ test("minimum output is part of the EIP-712 signature", async () => {
     chainId: config.chainId,
     verifyingContract: config.verifierAddress,
   });
-  const domain = {
-    name: "MEVShield",
-    version: "1",
+  const domain = policyDomain({
     chainId: config.chainId,
     verifyingContract: config.verifierAddress,
-  };
+  });
   assert.equal(
-    verifyTypedData(domain, getPolicyTypes(), policy, signature).toLowerCase(),
+    verifyTypedData(domain, POLICY_TYPES, policy, signature).toLowerCase(),
     wallet.address.toLowerCase(),
   );
 
   const changedBound = { ...policy, minAmountOut: policy.minAmountOut + 1n };
   assert.notEqual(
-    verifyTypedData(domain, getPolicyTypes(), changedBound, signature).toLowerCase(),
+    verifyTypedData(domain, POLICY_TYPES, changedBound, signature).toLowerCase(),
     wallet.address.toLowerCase(),
   );
 });

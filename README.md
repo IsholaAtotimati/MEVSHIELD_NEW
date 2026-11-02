@@ -90,7 +90,7 @@ The Solidity contracts integrate with the Uniswap v4 `PoolManager` and use a cus
 
 ### 5. Price-limit validation
 
-The current router implementation validates swap price limits before calling the pool manager. It also enforces a configurable maximum distance between the current tick and the requested price-limit tick.
+The current router implementation validates swap price limits before calling the pool manager. It also caps the distance between the current tick and the requested price-limit tick. That cap is a source constant fixed at 600 ticks in the current router, not a configurable setting, so changing it requires editing source, rebuilding, and redeploying.
 
 ### 6. Minimum-output enforcement
 
@@ -256,8 +256,8 @@ The current router policy structure includes:
 | `trader` | Identifies the trader associated with the policy. |
 | `nonce` | Supports replay protection and policy-use tracking. |
 | `expiry` | Defines when the policy expires. |
-| `maxLoss` | Defines an allowed loss constraint. |
-| `maxFee` | Defines an allowed fee constraint. |
+| `maxLoss` | Caps the loss estimate the hook will accept for this policy. |
+| `maxFee` | Caps the fee estimate the hook will accept for this policy. |
 | `zeroForOne` | Specifies the swap direction. |
 | `amountSpecified` | Binds the policy to the requested swap amount. |
 | `sqrtPriceLimitX96` | Specifies the requested price boundary. |
@@ -265,43 +265,56 @@ The current router policy structure includes:
 
 The policy is intended to bind authorization to the actual execution request. A mismatch between the policy and the submitted swap must not be treated as an acceptable authorization.
 
+`maxLoss` and `maxFee` do not bound a measured outcome. The hook compares each signed cap against caller-supplied estimate values taken from `hookData`, so the comparison constrains what the caller asserts, not what the swap actually costs. Realized minimum output and the tick distance cap are router-only checks. This boundary is recorded in [docs/reviews/2026-10-28-code-review.md](docs/reviews/2026-10-28-code-review.md).
+
 The implementation uses structured policy data and EIP-712-related signing and verification components. The precise signature domain, nonce lifecycle, expiry behavior, and authorization rules should be confirmed against the current contract implementations before an integration is considered production-ready.
 
 ---
 
 ## Risk Assessment
 
-The current MVP uses a deterministic, rule-based model.
+The backend estimates price impact from the current pool state for this trade size. It reads the pool's `sqrtPriceX96`, active liquidity, and swap fee, then quotes the trade against that active liquidity as a constant-product depth proxy.
 
-It does **not** currently claim to predict market movements, identify every sandwich attack, or use an AI model to calculate risk.
+It does not read the mempool, detect sandwich attacks, predict execution, or use an AI model. The figure is not a guarantee of realized loss.
 
 ### Current calculation
 
-In the current simplified implementation, the engine uses the absolute value of the specified amount:
+`amount` is the absolute value of `amountSpecified`. `zeroForOne` selects which token is the input. `L` is active liquidity and `sqrtP` is `sqrtPriceX96`.
 
 ```text
-absoluteAmount = abs(amountSpecified)
+fee        = amount * feePips / 1_000_000
+amountIn   = amount - fee
+estimatedFee = fee
 
-estimatedLoss = absoluteAmount / 1000
-estimatedFee  = absoluteAmount / 10000
+zeroForOne:
+  nextSqrt = ceil(L * 2^96 * sqrtP / (L * 2^96 + amountIn * sqrtP))
+  amountOut = L * (sqrtP - nextSqrt) / 2^96
+  outputValueInInput = amountOut * 2^96 / sqrtP * 2^96 / sqrtP
 
-maxLoss = estimatedLoss * 2
-maxFee  = estimatedFee * 2
+oneForZero:
+  nextSqrt = sqrtP + amountIn * 2^96 / L
+  amountOut = L * 2^96 * (nextSqrt - sqrtP) / (nextSqrt * sqrtP)
+  outputValueInInput = amountOut * sqrtP / 2^96 * sqrtP / 2^96
+
+estimatedLoss = amountIn - outputValueInInput
+lossBps       = estimatedLoss * 10_000 / amount
+maxLoss       = estimatedLoss * 2
+maxFee        = estimatedFee * 2
 ```
 
-The implementation also uses thresholds to assign a risk category:
+`estimatedLoss` is the shortfall versus selling the post-fee input at the spot price with no curvature. The swap fee is `estimatedFee`, not part of that shortfall. Integer division rounds the output value down.
 
-| Category | Current rule |
+| `lossBps` | `riskLevel` |
 |---|---|
-| LOW | `lossBps <= 10` |
-| MEDIUM | `lossBps <= 50`, after the LOW check |
-| HIGH | Above the MEDIUM threshold |
+| `<= 10` | `LOW` |
+| `<= 50` | `MEDIUM` |
+| `> 50` | `HIGH` |
 
-These formulas and thresholds are part of the current MVP, not a validated financial model.
+If active liquidity cannot support the trade (no liquidity, the input exhausts the virtual reserve, the next price leaves the Uniswap tick bounds, or the quote rounds to zero output), `estimatedLoss` is the full input amount and the level is `HIGH`. A failed pool read returns an error. The server does not fall back to `amount / 1000`.
 
-**Important limitations:** The current calculation is simplified and is not a complete market-aware estimate of slippage, price impact, swap fees, or MEV exposure. Its output should not be interpreted as a guarantee of realized loss or execution quality. Swap direction is not currently used in the simplified risk calculation.
+`/risk-preview` and `/policy` both use this function. The response disclaimer states the same limit: the number is a price-impact estimate from current pool state for this trade size.
 
-The long-term objective is to improve the risk model with better quote integration, pool-state information, execution simulation, and measurable evaluation against defined threat scenarios.
+**Important limitations:** Active liquidity is assumed to remain available for the whole trade. The model does not walk neighboring ticks, so a swap that leaves the current range can cost more than the estimate. It does not observe other transactions, gas, or whether a minimum-output check would revert. `maxLoss` and `maxFee` are twice the estimates. The hook still compares those caps to caller-supplied values in `hookData`; it does not measure this loss.
 
 ---
 
@@ -590,6 +603,8 @@ The project is experimental and should not be considered production-audited base
 
 No claim of a completed independent security audit is made here. Before handling meaningful user funds, MEVShield requires comprehensive security review, deployment verification, and adversarial testing.
 
+A source review of this repository on 28 October 2026 is recorded in [docs/reviews/2026-10-28-code-review.md](docs/reviews/2026-10-28-code-review.md). That note records the current enforcement boundary. It is not an independent audit.
+
 ---
 
 ## Current Limitations
@@ -602,6 +617,7 @@ The current MVP has important limitations:
 4. **Deployment consistency:** Local source and deployed bytecode must be independently matched before relying on a deployment.
 5. **Policy rollout controls:** Policy execution and minimum-output verification should remain disabled until their deployment and end-to-end checks are complete.
 6. **No production guarantee:** The MVP is not a substitute for an independent audit or a guarantee of profitable or safe swaps.
+7. **Enforcement boundary:** Signed authorization, expiry, and nonce consumption run in the hook. Realized minimum output and the tick-distance cap run in the router. Loss and fee caps are compared to caller-supplied estimates. Details are in the 28 October 2026 source review.
 
 The active Sepolia pool used during earlier development has encountered an invalid operational price state and must not be treated as a healthy pool for further swap testing. Use a newly validated, controlled test environment for subsequent end-to-end work.
 
@@ -659,7 +675,7 @@ A useful contribution should:
 4. Describe security implications and assumptions.
 5. Avoid introducing undocumented changes to deployment or authorization behavior.
 
-For smart-contract changes, run the relevant Foundry tests before opening a pull request.
+For smart-contract changes, run the relevant Foundry tests before opening a pull request. The commands for this repository, and the gates that stay closed, are in [docs/guides/developing.md](docs/guides/developing.md). Commit messages use the subject and bullet shape in [docs/guides/committing.md](docs/guides/committing.md). To prove the branch, start at [docs/runbook/how-to-test.md](docs/runbook/how-to-test.md).
 
 Do not include private keys, credentials, populated `.env` files, or sensitive production data in commits or issue reports.
 

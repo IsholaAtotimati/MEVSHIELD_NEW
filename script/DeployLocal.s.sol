@@ -54,7 +54,13 @@ contract DeployLocal is Script {
         info.authorization = address(new PolicyAuthorization(info.registry, info.verifier));
 
         PolicyVerifier(info.verifier).setAuthorizedSigner(signer);
-        PolicyRegistry(info.registry).setAuthorizedRegistrar(deployer);
+        // The registrar must be the PolicyAuthorization contract, not the deployer
+        // EOA. PolicyAuthorization.registerPolicy is what verifies the signature and
+        // then calls registry.registerPolicy, so registering the EOA here makes every
+        // policy from the app revert Unauthorized inside the registry — the signature
+        // is checked, then the write is refused. This matches DeploySepolia, which is
+        // the wiring the live Sepolia deployment actually has.
+        PolicyRegistry(info.registry).setAuthorizedRegistrar(info.authorization);
         PolicyRegistry(info.registry).setAuthorizedConsumer(info.authorization);
 
         (info.hook, info.salt) = _deployHook(info.manager, info.authorization);
