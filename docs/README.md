@@ -12,7 +12,7 @@ If a statement here and a statement in `README.md` disagree, this documentation 
 | New to the project, want the shape of the system | [Architecture overview](architecture/overview.md) |
 | Auditing what the contracts actually enforce | [Overview: what is enforced on-chain](architecture/overview.md#what-is-enforced-on-chain), then [Contracts](architecture/contracts.md) |
 | Integrating with the backend | [API reference](api/reference.md) |
-| Running or deploying it | [Configuration](operations/configuration.md), then [Testing](operations/testing.md) |
+| Running or deploying it | [Configuration](operations/configuration.md), then [Staging deploy](operations/staging-deploy.md) |
 | Writing a commit | [Committing](guides/committing.md) |
 | Understanding why something is the way it is | [Decisions](decisions/) |
 | Checking whether a user-facing capability works | [Features](features/) |
@@ -78,7 +78,8 @@ Status vocabulary:
 | Page | Answers |
 | --- | --- |
 | [configuration.md](operations/configuration.md) | Every environment variable in all three layers, with required or optional, default, purpose and a safety note |
-| [public-release-draft.md](operations/public-release-draft.md) | Draft: wallet-first landing at `/`, console at `/trade`, Vercel in front of the existing Railway API |
+| [staging-deploy.md](operations/staging-deploy.md) | How I deployed this branch to staging, and how you deploy the same two images on Coolify or another host |
+| [public-release-draft.md](operations/public-release-draft.md) | Draft: wallet-first landing at `/`, console at `/trade`. The earlier Vercel and Railway plan is not the copy that is running |
 | [testing.md](operations/testing.md) | How to run each suite, what each covers, which fork suites are gated, and why the V2 fork suite does not test the deployed router |
 | [runbook/how-to-test.md](runbook/how-to-test.md) | The three commands a lead runs, and what a pass looks like |
 | [runbook/local-docker.md](runbook/local-docker.md) | Bringing the whole stack up locally in Docker against anvil: the images, the compose services, the deploy and seed scripts, the verification script, and the ports |

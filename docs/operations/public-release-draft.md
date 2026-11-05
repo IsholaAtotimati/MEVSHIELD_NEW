@@ -1,6 +1,6 @@
 # Public entry and release draft
 
-Status: the landing page is in the frontend. Hosting is approved and not deployed yet: Vercel for this frontend, the existing Railway service for the API. Styles stay in `frontend/src/index.css`. Connect decisions stay in `frontend/src/lib/landingAction.ts`.
+Status: the landing page is in the frontend. Staging is deployed from `feature/sepolia-fork-demo`. I wrote the host, the env, and the manual deploy step in [staging-deploy.md](staging-deploy.md). The Vercel and Railway steps below are the earlier plan. They still work if you want that pair, and they are not what is running. Styles stay in `frontend/src/index.css`. Connect decisions stay in `frontend/src/lib/landingAction.ts`.
 
 The public name in the product is **MEVShield**. The wordmark in the app is `MEV` plus a mint `Shield`.
 
@@ -169,4 +169,4 @@ Check, once this section is approved: the landing page in the browser on a Sepol
 
 ## Hosting
 
-Approved. Vercel serves the frontend. The existing Railway service serves the API. The local anvil stack stays local. Demo mode and the execute gate stay unset on the Vercel build.
+Staging is the Coolify copy in [staging-deploy.md](staging-deploy.md). The local anvil stack stays local. Demo mode and the execute gate stay unset. Vercel for the frontend and Railway for the API remain a valid second copy. They are not the staging host.
