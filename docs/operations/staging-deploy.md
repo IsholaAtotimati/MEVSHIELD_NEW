@@ -85,7 +85,9 @@ Pushing those repositories does not refresh those containers either.
 
 Both apps now build from **`Eykegai/mevshield`** (private org repo), branch **`development`**, through the `eykegai-coolify` GitHub App. The app is installed on the org with only `Eykegai/mevshield` selected. `development` holds the full `feature/sepolia-fork-demo` history, including the docs commit, and is the repo's default branch. `IsholaAtotimati/MEVSHIELD_NEW` stays my working mirror; until a mirror step is automated, a deploy source change has to be pushed to both. When this work lands on `main`, I will point the apps at `main` and redeploy.
 
-The GitHub App still needs its webhook URL set before a push triggers a deploy by itself: `https://coolify.eykegai.com/webhooks/github-app/uvfzdfffhk1cqbmipyvnh7cg` under the app's Webhook settings on GitHub. Until then, deploys stay manual.
+The GitHub App still needs its webhook URL set before a push triggers a deploy by itself: `https://coolify.eykegai.com/webhooks/source/github/events` under the app's Webhook settings on GitHub, with the same webhook secret as this Coolify source. Until then, deploys stay manual.
+
+I push both remotes with one command, `./script/push-both.sh`. It sends the current branch to `origin` under its own name and to `eykegai` as `development`, and it refuses to run on `main`.
 
 ## What I check after a deploy
 
