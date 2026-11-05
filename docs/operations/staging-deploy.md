@@ -71,19 +71,21 @@ If your Coolify proxy owns 443 itself, skip the Apache step. Give each app an `h
 
 The local anvil page on my laptop is a third build. It is `VITE_CHAIN_ID=31337`, produced only by `./script/local-test-flow.sh`. Do not point a public hostname at it, and do not copy a Sepolia `frontend/dist` over it while that container is running.
 
-## A push does not deploy
+## A push does not deploy, yet
 
 I did not turn on automatic deployment. Pushing `feature/sepolia-fork-demo` updates GitHub and leaves the running containers on the commit they were built from. I start a deploy by hand in Coolify, once for the API and once for the site. A frontend change needs the site rebuild. An API change needs the API rebuild. A `VITE_*` change is a site rebuild even when the backend did not change.
-
-This Coolify team has the public-repository source, not a GitHub App, so GitHub has nothing to call when I push. The same is true of the other resources already on this server. None of them follow a Git branch:
 
 - `whoami` is a published image, used to prove the proxy.
 - `japa-wordpress` is a Coolify template, not a git build.
 - `social-wowonder` and `jpool-app` were built from directories on the VPS, not from a GitHub webhook.
 
-Pushing those repositories does not refresh those containers either. Coolify can auto-deploy later if I connect a GitHub App and leave automatic deployment on for an app. I have not done that.
+Pushing those repositories does not refresh those containers either.
 
-When this branch is merged, I will point both apps at `main` and deploy again. Until then, deploy `feature/sepolia-fork-demo`.
+## Where the deploy source lives now
+
+Both apps now build from **`Eykegai/mevshield`** (private org repo), branch **`development`**, through the `eykegai-coolify` GitHub App. The app is installed on the org with only `Eykegai/mevshield` selected. `development` holds the full `feature/sepolia-fork-demo` history, including the docs commit, and is the repo's default branch. `IsholaAtotimati/MEVSHIELD_NEW` stays my working mirror; until a mirror step is automated, a deploy source change has to be pushed to both. When this work lands on `main`, I will point the apps at `main` and redeploy.
+
+The GitHub App still needs its webhook URL set before a push triggers a deploy by itself: `https://coolify.eykegai.com/webhooks/github-app/uvfzdfffhk1cqbmipyvnh7cg` under the app's Webhook settings on GitHub. Until then, deploys stay manual.
 
 ## What I check after a deploy
 
