@@ -71,21 +71,18 @@ If your Coolify proxy owns 443 itself, skip the Apache step. Give each app an `h
 
 The local anvil page on my laptop is a third build. It is `VITE_CHAIN_ID=31337`, produced only by `./script/local-test-flow.sh`. Do not point a public hostname at it, and do not copy a Sepolia `frontend/dist` over it while that container is running.
 
-## A push does not deploy, yet
+## A push deploys staging
 
-I did not turn on automatic deployment. Pushing `feature/sepolia-fork-demo` updates GitHub and leaves the running containers on the commit they were built from. I start a deploy by hand in Coolify, once for the API and once for the site. A frontend change needs the site rebuild. An API change needs the API rebuild. A `VITE_*` change is a site rebuild even when the backend did not change.
+Pushing to `Eykegai/mevshield` `development` deploys both apps automatically. The `eykegai-coolify` GitHub App has the webhook `https://coolify.eykegai.com/webhooks/source/github/events` with the secret stored in this Coolify source, and each push has rebuilt both containers on its own.
 
-- `whoami` is a published image, used to prove the proxy.
-- `japa-wordpress` is a Coolify template, not a git build.
-- `social-wowonder` and `jpool-app` were built from directories on the VPS, not from a GitHub webhook.
-
-Pushing those repositories does not refresh those containers either.
+- A frontend change needs the site rebuild only. An API change needs the API rebuild only. A `VITE_*` change is a site rebuild even when the backend did not change.
+- The other resources on this server do not follow a Git branch: `whoami` is a published image, `japa-wordpress` is a Coolify template, and `social-wowonder` and `jpool-app` were built from directories on the VPS.
 
 ## Where the deploy source lives now
 
 Both apps now build from **`Eykegai/mevshield`** (private org repo), branch **`development`**, through the `eykegai-coolify` GitHub App. The app is installed on the org with only `Eykegai/mevshield` selected. `development` holds the full `feature/sepolia-fork-demo` history, including the docs commit, and is the repo's default branch. `IsholaAtotimati/MEVSHIELD_NEW` stays my working mirror; until a mirror step is automated, a deploy source change has to be pushed to both. When this work lands on `main`, I will point the apps at `main` and redeploy.
 
-The GitHub App still needs its webhook URL set before a push triggers a deploy by itself: `https://coolify.eykegai.com/webhooks/source/github/events` under the app's Webhook settings on GitHub, with the same webhook secret as this Coolify source. Until then, deploys stay manual.
+The deploy webhook was already configured during the app registration. Do not change it: the URL is `https://coolify.eykegai.com/webhooks/source/github/events` and the secret is the one stored in this Coolify source.
 
 I push both remotes with one command, `./script/push-both.sh`. It sends the current branch to `origin` under its own name and to `eykegai` as `development`, and it refuses to run on `main`.
 
