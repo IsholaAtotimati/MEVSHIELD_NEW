@@ -106,10 +106,10 @@ export default function TradePage() {
 
   const minimumOutput = SEPOLIA_DEMO_MODE
     ? `${formatBaseUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (demo floor)`
-    : quoteIsFresh && quote.protectedQuote.status === "available"
+    : quoteIsFresh && quote.poolQuote !== null && quote.poolQuote.status === "available"
       ? (() => {
           const minimum = calculateMinimumOutput(
-            quote.protectedQuote.amountOutBaseUnits,
+            quote.poolQuote.amountOutBaseUnits,
             slippageBps,
           );
           return minimum === null
@@ -125,7 +125,7 @@ export default function TradePage() {
 
   const priceImpact = SEPOLIA_DEMO_MODE
     ? "estimate only (demo)"
-    : quoteIsFresh && quote.protectedQuote.status === "available"
+    : quoteIsFresh && quote.poolQuote !== null && quote.poolQuote.status === "available"
       ? "from protected pool quote"
       : "unavailable";
 
@@ -156,7 +156,7 @@ export default function TradePage() {
           demoMode={SEPOLIA_DEMO_MODE}
           demoEstimateBaseUnits={demoEstimateBaseUnits}
           quoteIsFresh={quoteIsFresh}
-          protectedQuote={quote.protectedQuote}
+          poolQuote={quote.poolQuote}
           routeDirection={routeDirection}
           onInputAmountChange={onInputAmountChange}
           onInputTokenChange={(next) => {
@@ -195,7 +195,12 @@ export default function TradePage() {
             ))}
             <Button
               variant="chip"
-              onClick={() => void quote.inspectProtectedPool()}
+              onClick={() => {
+                void quote.inspectProtectedPool();
+                if (inputAmountBaseUnits !== null && zeroForOne !== null) {
+                  void quote.refreshPoolQuote(inputAmountBaseUnits, zeroForOne);
+                }
+              }}
             >
               Refresh quote
             </Button>

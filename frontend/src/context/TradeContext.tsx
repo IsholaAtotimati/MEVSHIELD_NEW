@@ -99,6 +99,7 @@ function useTradeState() {
     zeroForOne,
     slippageBps,
     protectedQuote: quoteHook.protectedQuote,
+    poolQuote: quoteHook.poolQuote,
     quoteIsFresh,
     demoEstimateReady,
     quoteClockMs: quoteHook.quoteClockMs,
@@ -167,6 +168,7 @@ function useTradeState() {
     zeroForOne,
     slippageBps,
     protectedQuote: quoteHook.protectedQuote,
+    poolQuote: quoteHook.poolQuote,
     quoteIsFresh,
     demoEstimateReady,
     swapReadiness,
@@ -182,6 +184,24 @@ function useTradeState() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clear execution when policy resets
   }, [clearExecutionTick]);
+
+  /**
+   * Debounced backend quote for the current input. An amount change invalidates
+   * the old quote immediately (stale numbers must never render), then a quiet
+   * 400 ms fetch replaces it once the typing settles.
+   */
+  useEffect(() => {
+    if (inputAmountBaseUnits === null || zeroForOne === null) {
+      quoteHook.setPoolQuote(null);
+      return;
+    }
+    quoteHook.setPoolQuote(null);
+    const timer = window.setTimeout(() => {
+      void quoteHook.refreshPoolQuote(inputAmountBaseUnits, zeroForOne);
+    }, 400);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch only on amount or direction change
+  }, [inputAmountBaseUnits, zeroForOne]);
 
   const resetSwapFlow = useCallback(() => {
     policyHook.clearPolicyState();

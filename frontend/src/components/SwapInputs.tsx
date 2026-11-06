@@ -33,7 +33,8 @@ type SwapInputsProps = {
   demoMode: boolean;
   demoEstimateBaseUnits: bigint | null;
   quoteIsFresh: boolean;
-  protectedQuote: ProtectedQuote;
+  /** The backend's active-tick estimate for the current input, if any. */
+  poolQuote: ProtectedQuote | null;
   routeDirection: string;
   onInputAmountChange: (value: string) => void;
   onInputTokenChange: (token: SwapTokenSymbol) => void;
@@ -56,7 +57,7 @@ export default function SwapInputs({
   demoMode,
   demoEstimateBaseUnits,
   quoteIsFresh,
-  protectedQuote,
+  poolQuote,
   routeDirection,
   onInputAmountChange,
   onInputTokenChange,
@@ -70,8 +71,10 @@ export default function SwapInputs({
   const receiveValue =
     demoMode && demoEstimateBaseUnits !== null
       ? formatUnits(demoEstimateBaseUnits, receiveToken.decimals)
-      : quoteIsFresh && protectedQuote.status === "available"
-        ? formatUnits(protectedQuote.amountOutBaseUnits, receiveToken.decimals)
+      : poolQuote !== null &&
+          poolQuote.status === "available" &&
+          quoteIsFresh
+        ? formatUnits(poolQuote.amountOutBaseUnits, receiveToken.decimals)
         : "";
 
   const receiveTone = receiveValue ? " gain" : "";

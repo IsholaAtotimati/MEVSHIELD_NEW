@@ -43,6 +43,12 @@ type UsePolicyArgs = {
   zeroForOne: boolean | null;
   slippageBps: number;
   protectedQuote: ProtectedQuote;
+  /**
+   * The backend's active-tick estimate for the current input, or `null`.
+   * Signing and its minimum output read this; `protectedQuote` stays the
+   * pool-health leg that demo mode reads.
+   */
+  poolQuote: ProtectedQuote | null;
   quoteIsFresh: boolean;
   demoEstimateReady: boolean;
   quoteClockMs: number;
@@ -176,6 +182,7 @@ export function usePolicy(args: UsePolicyArgs) {
       inputToken,
       outputToken,
       protectedQuote,
+      poolQuote,
       quoteIsFresh,
       demoEstimateReady,
       slippageBps,
@@ -255,7 +262,7 @@ export function usePolicy(args: UsePolicyArgs) {
       }
       if (
         !SEPOLIA_DEMO_MODE &&
-        (protectedQuote.status !== "available" || !quoteIsFresh)
+        (poolQuote === null || poolQuote.status !== "available" || !quoteIsFresh)
       ) {
         throw new Error(
           "A genuine fresh protected-pool quote is required before policy signing.",
@@ -272,9 +279,9 @@ export function usePolicy(args: UsePolicyArgs) {
       }
       const minAmountOut = SEPOLIA_DEMO_MODE
         ? DEMO_MIN_AMOUNT_OUT
-        : protectedQuote.status === "available"
+        : poolQuote !== null && poolQuote.status === "available"
           ? calculateMinimumOutput(
-              protectedQuote.amountOutBaseUnits,
+              poolQuote.amountOutBaseUnits,
               slippageBps,
             )
           : null;

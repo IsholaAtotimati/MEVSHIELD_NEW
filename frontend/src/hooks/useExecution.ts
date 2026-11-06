@@ -35,6 +35,8 @@ type UseExecutionArgs = {
   zeroForOne: boolean | null;
   slippageBps: number;
   protectedQuote: ProtectedQuote;
+  /** The backend active-tick estimate; the execution minimum reads this. */
+  poolQuote: ProtectedQuote | null;
   quoteIsFresh: boolean;
   demoEstimateReady: boolean;
   swapReadiness: SwapReadiness;
@@ -56,6 +58,7 @@ export function useExecution(args: UseExecutionArgs) {
       inputAmountBaseUnits,
       inputToken,
       protectedQuote,
+      poolQuote,
       quoteIsFresh,
       demoEstimateReady,
       slippageBps,
@@ -123,9 +126,9 @@ export function useExecution(args: UseExecutionArgs) {
       }
       const requiredMinimumOutput = SEPOLIA_DEMO_MODE
         ? DEMO_MIN_AMOUNT_OUT
-        : protectedQuote.status === "available"
+        : poolQuote !== null && poolQuote.status === "available"
           ? calculateMinimumOutput(
-              protectedQuote.amountOutBaseUnits,
+              poolQuote.amountOutBaseUnits,
               slippageBps,
             )
           : null;
@@ -138,7 +141,9 @@ export function useExecution(args: UseExecutionArgs) {
         requiredMinimumOutput === null ||
         policy.policy.minAmountOut !== requiredMinimumOutput.toString() ||
         (!SEPOLIA_DEMO_MODE &&
-          (protectedQuote.status !== "available" || !quoteIsFresh)) ||
+          (poolQuote === null ||
+            poolQuote.status !== "available" ||
+            !quoteIsFresh)) ||
         (SEPOLIA_DEMO_MODE &&
           (!demoEstimateReady ||
             !isFreshDemoPoolReadiness(protectedQuote, Date.now())))
