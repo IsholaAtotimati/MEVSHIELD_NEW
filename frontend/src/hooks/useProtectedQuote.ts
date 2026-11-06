@@ -10,6 +10,7 @@ import {
 import { CONTRACTS } from "../lib/contracts";
 import { mevShieldHookAbi } from "../lib/abis";
 import {
+  backendQuoteToProtectedQuote,
   decodePoolState,
   isFreshQuote,
   loadProtectedPoolQuote,
@@ -29,6 +30,7 @@ export function useProtectedQuote() {
   const [quoteClockMs, setQuoteClockMs] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [backendPoolKeyVerified, setBackendPoolKeyVerified] = useState(false);
+  const [poolQuote, setPoolQuote] = useState<ProtectedQuote | null>(null);
 
   const demoBackendIsLocal =
     !SEPOLIA_DEMO_MODE || isLocalBackendUrl(BACKEND_URL);
@@ -125,6 +127,46 @@ export function useProtectedQuote() {
     }
   }, []);
 
+  /**
+   * Ask the backend for the active-tick estimate of this exact input. The
+   * response is parsed against what we sent, so a drifted backend yields
+   * `null` — which every consumer treats the same as no quote. Skipped in
+   * demo mode: that path uses the deterministic estimate, not the pool.
+   */
+  const refreshPoolQuote = useCallback(
+    async (amountBaseUnits: bigint, zeroForOne: boolean) => {
+      if (SEPOLIA_DEMO_MODE || SWAP_POOL_ID === null || amountBaseUnits <= 0n) {
+        setPoolQuote(null);
+        return;
+      }
+      try {
+        const response = await fetch(`${BACKEND_URL}/quote`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amountSpecified: `-${amountBaseUnits}`,
+            zeroForOne,
+          }),
+        });
+        if (!response.ok) {
+          setPoolQuote(null);
+          return;
+        }
+        const body: unknown = await response.json();
+        setPoolQuote(
+          backendQuoteToProtectedQuote(body, {
+            poolId: SWAP_POOL_ID,
+            amountSpecified: amountBaseUnits,
+            quotedAtMs: Date.now(),
+          }),
+        );
+      } catch {
+        setPoolQuote(null);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     void inspectProtectedPool();
     void verifyBackendPoolConfiguration();
@@ -160,13 +202,20 @@ export function useProtectedQuote() {
       SWAP_POOL_CONFIGURATION.status === "configured",
     inspectProtectedPool,
     verifyBackendPoolConfiguration,
+    /**
+     * The backend's active-tick estimate for the current input, or `null`
+     * when no quote has been fetched (or the last fetch was refused). The
+     * signing and execution gates read this via `isQuoteFresh`.
+     */
+    poolQuote,
+    refreshPoolQuote,
     isQuoteFresh: (
       amountBaseUnits: bigint | null,
     ) =>
       SWAP_POOL_ID !== null &&
       isFreshQuote(
-        protectedQuote,
-        quoteClockMs,
+        poolQuote ?? { status: "unavailable", reason: "not-checked" },
+        nowMs,
         amountBaseUnits,
         SWAP_POOL_ID,
       ),
