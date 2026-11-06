@@ -124,14 +124,28 @@ export function isUnknownChainError(error: unknown): boolean {
  * user granted access earlier, and an empty array when they did not or the
  * wallet is locked. A provider failure on load is a missing session, not a
  * crash: the Connect button stays the way forward.
+ *
+ * An explicit in-app disconnect is remembered (`userDisconnected`) and wins
+ * over the provider: the provider is not even asked, so a reload after
+ * Disconnect stays disconnected instead of silently re-attaching an account
+ * the user just removed. The wallet's own Disconnect (account revocation in
+ * MetaMask) clears the flag naturally, because `eth_accounts` then returns
+ * an empty array.
  */
 export type ReconnectPlan =
   | { kind: "restore"; account: string }
   | { kind: "none" };
 
+/** localStorage key remembering an explicit in-app disconnect. */
+export const USER_DISCONNECTED_KEY = "mevshield-wallet-user-disconnected";
+
 export async function planReconnect(
   request: WalletRequest,
+  options: { userDisconnected?: boolean } = {},
 ): Promise<ReconnectPlan> {
+  if (options.userDisconnected === true) {
+    return { kind: "none" };
+  }
   let accounts: unknown;
   try {
     accounts = await request({ method: "eth_accounts" });

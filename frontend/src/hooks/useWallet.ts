@@ -6,6 +6,7 @@ import { CHAIN_NAME, IS_LOCAL_CHAIN, RPC_URL } from "../config/chain";
 import { CHAIN_ID } from "../lib/contracts";
 import { fundInjectedLocalAccount } from "../lib/localFaucet";
 import {
+  USER_DISCONNECTED_KEY,
   WALLET_ERROR,
   WALLET_STATUS,
   planConnectAnvil,
@@ -44,6 +45,8 @@ export function useWallet() {
       if (plan.kind === "refuse") {
         throw new Error(plan.message);
       }
+      // A fresh connect replaces any remembered explicit disconnect.
+      window.localStorage.removeItem(USER_DISCONNECTED_KEY);
       if (plan.kind === "anvil") {
         const address = connectLocalAnvilAccount();
         setAccount(address);
@@ -109,6 +112,9 @@ export function useWallet() {
 
   const disconnectWallet = useCallback(() => {
     disconnectLocalAnvilAccount();
+    // Remember the explicit choice: a reload must not silently re-attach the
+    // account through eth_accounts. A later Connect clears the flag.
+    window.localStorage.setItem(USER_DISCONNECTED_KEY, "1");
     setAccount(null);
     setBalance("—");
     setChainId(null);
@@ -129,7 +135,10 @@ export function useWallet() {
     let cancelled = false;
     const ethereum = window.ethereum;
     void (async () => {
-      const plan = await planReconnect(ethereum.request.bind(ethereum));
+      const plan = await planReconnect(ethereum.request.bind(ethereum), {
+        userDisconnected:
+          window.localStorage.getItem(USER_DISCONNECTED_KEY) === "1",
+      });
       if (cancelled || plan.kind !== "restore") {
         return;
       }

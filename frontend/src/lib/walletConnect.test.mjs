@@ -17,6 +17,7 @@ import {
   planReconnect,
   selectInjectedChain,
   showsAnvilAccountButton,
+  USER_DISCONNECTED_KEY,
 } from "./walletConnect.ts";
 
 test("the published anvil key is account #0 and nothing else", () => {
@@ -250,4 +251,31 @@ test("an empty account entry is not treated as a session", async () => {
 test("a non-string account entry is ignored", async () => {
   const plan = await planReconnect(async () => [42]);
   assert.deepEqual(plan, { kind: "none" });
+});
+
+// ---------------------------------------------------------------------------
+// An explicit in-app disconnect outlives a reload
+// ---------------------------------------------------------------------------
+
+test("an explicit in-app disconnect suppresses the silent reconnect entirely", async () => {
+  const calls = [];
+  const request = async (args) => {
+    calls.push(args.method);
+    return accounts;
+  };
+  const plan = await planReconnect(request, { userDisconnected: true });
+  assert.deepEqual(plan, { kind: "none" });
+  assert.deepEqual(calls, [], "the provider must not be asked when the user chose to disconnect");
+});
+
+test("without an explicit disconnect the silent reconnect still runs", async () => {
+  const plan = await planReconnect(
+    async () => accounts,
+    { userDisconnected: false },
+  );
+  assert.deepEqual(plan, { kind: "restore", account: accounts[0] });
+});
+
+test("the explicit-disconnect storage key lives with the wallet decisions", () => {
+  assert.equal(USER_DISCONNECTED_KEY, "mevshield-wallet-user-disconnected");
 });
