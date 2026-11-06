@@ -208,6 +208,7 @@ export function useProtectedQuote() {
      * signing and execution gates read this via `isQuoteFresh`.
      */
     poolQuote,
+    setPoolQuote,
     refreshPoolQuote,
     isQuoteFresh: (
       amountBaseUnits: bigint | null,
