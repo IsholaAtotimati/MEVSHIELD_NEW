@@ -37,6 +37,8 @@ export type ActivePoolState = {
   sqrtPriceX96: bigint;
   liquidity: bigint;
   feePips: bigint;
+  /** Packed int24 tick from slot0 bits 160..183, decoded with sign. */
+  tick: number;
 };
 
 export type PoolStateReader = () => Promise<ActivePoolState>;
@@ -93,7 +95,9 @@ export function decodePoolState(
   const lpFee = (slot0Word >> 208n) & 0xffffffn;
   const liquidity = liquidityWord & ((1n << 128n) - 1n);
   const feePips = lpFee > 0n ? lpFee : fallbackFeePips;
-  return { sqrtPriceX96, liquidity, feePips };
+  const rawTick = (slot0Word >> 160n) & 0xffffffn;
+  const tick = rawTick >= 0x800000n ? rawTick - 0x1000000n : rawTick;
+  return { sqrtPriceX96, liquidity, feePips, tick: Number(tick) };
 }
 
 export function createProtectedPoolReader(

@@ -16,6 +16,9 @@ const OBSERVED_SLOT0_KEY =
 const OBSERVED_SLOT0_WORD =
   0x000000000bb80000000307570000000000004fbc6a1e3126042957bd9612d33dn;
 const OBSERVED_LIQUIDITY_WORD = 0x166e292da9cn;
+/** slot0 word read from the live Sepolia pool on 2026-11-05 (tick 199086). */
+const LIVE_SLOT0_WORD =
+  0x000000000bb80000000309ae00000000000052280a823ab3172fde5ad4668b52n;
 
 test("pool state slot matches the PoolManager layout used on Sepolia", () => {
   const slots = poolStateSlots(POOL_ID);
@@ -45,6 +48,19 @@ test("returns zero liquidity instead of inventing depth", () => {
   const state = decodePoolState(OBSERVED_SLOT0_WORD, 0n, 3000n);
   assert.equal(state.liquidity, 0n);
   assert.equal(state.sqrtPriceX96, 1617238095152076543778314735768381n);
+});
+
+test("decodes the packed int24 tick from slot0", () => {
+  const state = decodePoolState(LIVE_SLOT0_WORD, 0n, 3000n);
+  assert.equal(state.tick, 199_086);
+});
+
+test("decodes a negative tick when the int24 sign bit is set", () => {
+  const word =
+    0xffffffn << 160n |
+    1617238095152076543778314735768381n;
+  const state = decodePoolState(word, 0n, 3000n);
+  assert.equal(state.tick, -1);
 });
 
 test("uninitialized pool is a failed read", () => {
