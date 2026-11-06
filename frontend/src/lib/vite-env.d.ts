@@ -9,6 +9,12 @@ interface Window {
       method: string;
       params?: unknown[];
     }) => Promise<unknown>;
+    /** EIP-1193 event subscription. Present on MetaMask and similar wallets. */
+    on?: (eventName: string, listener: (...args: unknown[]) => void) => void;
+    removeListener?: (
+      eventName: string,
+      listener: (...args: unknown[]) => void,
+    ) => void;
   };
 }
 

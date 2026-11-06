@@ -14,6 +14,7 @@ import {
   isUnknownChainError,
   planConnectAnvil,
   planConnectWallet,
+  planReconnect,
   selectInjectedChain,
   showsAnvilAccountButton,
 } from "./walletConnect.ts";
@@ -202,4 +203,51 @@ test("status strings the top bar renders stay stable", () => {
     "Install a browser wallet, then click Connect wallet again.",
   );
   assert.equal(WALLET_ERROR.noAccount, "The wallet did not return an account.");
+});
+
+// ---------------------------------------------------------------------------
+// Silent reconnect: read the provider's own state before any prompt
+// ---------------------------------------------------------------------------
+
+const accounts = ["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"];
+
+test("a connected provider restores the account silently on load", async () => {
+  const calls = [];
+  const request = async (args) => {
+    calls.push(args.method);
+    if (args.method === "eth_accounts") return accounts;
+    throw new Error(`unexpected method ${args.method}`);
+  };
+  const plan = await planReconnect(request);
+  assert.deepEqual(plan, { kind: "restore", account: accounts[0] });
+  assert.deepEqual(calls, ["eth_accounts"]);
+});
+
+test("a locked or disconnected provider is not an error and prompts nothing", async () => {
+  const calls = [];
+  const request = async (args) => {
+    calls.push(args.method);
+    if (args.method === "eth_accounts") return [];
+    throw new Error(`unexpected method ${args.method}`);
+  };
+  const plan = await planReconnect(request);
+  assert.deepEqual(plan, { kind: "none" });
+  assert.deepEqual(calls, ["eth_accounts"]);
+});
+
+test("a provider failure on load degrades to no session, not a thrown error", async () => {
+  const plan = await planReconnect(async () => {
+    throw Object.assign(new Error("provider not ready"), { code: -32002 });
+  });
+  assert.deepEqual(plan, { kind: "none" });
+});
+
+test("an empty account entry is not treated as a session", async () => {
+  const plan = await planReconnect(async () => [""], );
+  assert.deepEqual(plan, { kind: "none" });
+});
+
+test("a non-string account entry is ignored", async () => {
+  const plan = await planReconnect(async () => [42]);
+  assert.deepEqual(plan, { kind: "none" });
 });

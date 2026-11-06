@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
 import { formatEther } from "viem";
 
@@ -10,6 +10,7 @@ import {
   WALLET_STATUS,
   planConnectAnvil,
   planConnectWallet,
+  planReconnect,
   selectInjectedChain,
 } from "../lib/walletConnect";
 import {
@@ -112,6 +113,77 @@ export function useWallet() {
     setBalance("—");
     setChainId(null);
     setWalletStatus(WALLET_STATUS.disconnected);
+  }, []);
+
+  /**
+   * Silent reconnect on mount. `eth_accounts` returns the wallet's remembered
+   * accounts without a prompt, so a refresh restores the session a connected
+   * wallet already granted. The anvil signer is deliberately not restored:
+   * that key is a click away on the local page, and a browser wallet the user
+   * connected must never be replaced by it silently.
+   */
+  useEffect(() => {
+    if (IS_LOCAL_CHAIN || !window.ethereum) {
+      return;
+    }
+    let cancelled = false;
+    const ethereum = window.ethereum;
+    void (async () => {
+      const plan = await planReconnect(ethereum.request.bind(ethereum));
+      if (cancelled || plan.kind !== "restore") {
+        return;
+      }
+      const address = plan.account as Address;
+      setAccount(address);
+      setWalletStatus(WALLET_STATUS.connected);
+      const id = await ethereum
+        .request({ method: "eth_chainId" })
+        .catch(() => null);
+      if (cancelled) return;
+      setChainId(
+        typeof id === "string" ? Number.parseInt(id, 16) : null,
+      );
+      await refreshBalance(address);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshBalance]);
+
+  /**
+   * Follow the wallet after the session exists: account switches and chain
+   * switches made inside MetaMask update the page without a reload. Only an
+   * injected provider emits these; the anvil signer has none.
+   */
+  useEffect(() => {
+    if (IS_LOCAL_CHAIN || !window.ethereum) {
+      return;
+    }
+    const ethereum = window.ethereum;
+    const onAccountsChanged = (...args: unknown[]) => {
+      const accounts = args[0];
+      if (!Array.isArray(accounts)) return;
+      const next = accounts.find(
+        (value): value is string => typeof value === "string" && value !== "",
+      );
+      setAccount((next as Address | undefined) ?? null);
+      if (!next) {
+        setBalance("—");
+        setWalletStatus(WALLET_STATUS.disconnected);
+      }
+    };
+    const onChainChanged = (...args: unknown[]) => {
+      const chainIdHex = args[0];
+      if (typeof chainIdHex === "string") {
+        setChainId(Number.parseInt(chainIdHex, 16));
+      }
+    };
+    ethereum.on?.("accountsChanged", onAccountsChanged);
+    ethereum.on?.("chainChanged", onChainChanged);
+    return () => {
+      ethereum.removeListener?.("accountsChanged", onAccountsChanged);
+      ethereum.removeListener?.("chainChanged", onChainChanged);
+    };
   }, []);
 
   const ensureSepolia = useCallback(async () => {

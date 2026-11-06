@@ -118,6 +118,37 @@ export function isUnknownChainError(error: unknown): boolean {
 }
 
 /**
+ * Silent reconnect plan for a page load.
+ *
+ * `eth_accounts` returns the remembered accounts without a prompt when the
+ * user granted access earlier, and an empty array when they did not or the
+ * wallet is locked. A provider failure on load is a missing session, not a
+ * crash: the Connect button stays the way forward.
+ */
+export type ReconnectPlan =
+  | { kind: "restore"; account: string }
+  | { kind: "none" };
+
+export async function planReconnect(
+  request: WalletRequest,
+): Promise<ReconnectPlan> {
+  let accounts: unknown;
+  try {
+    accounts = await request({ method: "eth_accounts" });
+  } catch {
+    return { kind: "none" };
+  }
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    return { kind: "none" };
+  }
+  const account = accounts[0];
+  if (typeof account !== "string" || account === "") {
+    return { kind: "none" };
+  }
+  return { kind: "restore", account };
+}
+
+/**
  * Point an injected wallet at this bundle's chain.
  *
  * Already-correct wallets are left alone. A known chain is switched. An
