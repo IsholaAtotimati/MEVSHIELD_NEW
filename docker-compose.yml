@@ -1,0 +1,256 @@
+# MEVShield local Docker stack.
+#
+# One command brings up a complete, working copy of the project:
+#
+#   ./script/docker-local-up.sh        (recommended; waits and prints addresses)
+#   docker compose up -d --build       (plain compose)
+#
+# Services, in start order:
+#   anvil              local chain, chain id 31337, deterministic accounts
+#   contracts-deploy   one-shot: deploys contracts, sets up the pool, writes
+#                      the addresses to a shared volume, then exits 0
+#   backend            Express API on chain 31337, pinned to the deployed addresses
+#   frontend           nginx serving the Vite build, configured for chain 31337
+#
+# Everything here is LOCAL ONLY. The chain is anvil, the keys are anvil's
+# published development keys, and none of it may be reused on a real network.
+#
+# Security posture: the backend image defaults to NODE_ENV=production, which
+# closes the local-chain gate. This file sets NODE_ENV=development together with
+# the explicit MEVSHIELD_LOCAL_CHAIN_ENABLED=true so the gate opens for this
+# stack only. The frontend keeps VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED
+# false, so the execute gate stays closed even here.
+
+name: mevshield-local
+
+# ---------------------------------------------------------------------------
+# Shared settings
+# ---------------------------------------------------------------------------
+x-contracts-image: &contracts-image
+  image: mevshield/contracts:local
+  build:
+    context: .
+    dockerfile: Dockerfile.contracts
+    args:
+      SUBMODULE_MODE: copy
+
+# The deterministic addresses that script/DeployLocal.s.sol and
+# script/SetupBackendSwap.s.sol produce from a fresh anvil. Verified in
+# docs/runbook/local-docker.md. They appear inline in the backend and frontend
+# service blocks so compose can render either one on its own, and
+# contracts-deploy re-checks the deployed values against them.
+
+services:
+  # -------------------------------------------------------------------------
+  # Local chain
+  # -------------------------------------------------------------------------
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:v1.5.1
+    container_name: mevshield-anvil
+    # anvil is the entrypoint; these are its arguments.
+    entrypoint: ["anvil"]
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8545"
+      - "--chain-id"
+      - "31337"
+      # Zero base fee keeps the local flow cheap and predictable; gas limits are
+      # generous because Uniswap v4 pool initialization is heavy.
+      - "--base-fee"
+      - "0"
+      - "--gas-limit"
+      - "30000000"
+      # Fixed mnemonic so the accounts and therefore the deployed addresses are
+      # identical on every `docker compose up`. This is anvil's default mnemonic
+      # and its keys are public knowledge: LOCAL ONLY.
+      - "--mnemonic"
+      - "test test test test test test test test test test test junk"
+      - "--accounts"
+      - "10"
+      - "--balance"
+      - "10000"
+    ports:
+      # Exposed so MetaMask can add the network and the browser can read it.
+      - "${ANVIL_PORT:-8545}:8545"
+    # No state volume on purpose.
+    #
+    # anvil keeps chain state in memory, so every `docker compose up` starts from
+    # the same genesis. That is what makes the deployed addresses deterministic
+    # and lets the backend and frontend pin them before the deploy has run.
+    #
+    # Persisting state across `up` would land the second deploy on an
+    # already-used nonce sequence, producing different addresses and tripping the
+    # drift guard in contracts-deploy. `docker compose restart anvil` keeps the
+    # running container's state; `docker compose down` discards it, which is the
+    # reset path.
+    healthcheck:
+      # cast ships in this image, so no extra tooling is needed. eth_chainId must
+      # return 0x7a69 (31337), not merely answer.
+      test:
+        - "CMD-SHELL"
+        - 'cast chain-id --rpc-url http://127.0.0.1:8545 | grep -qx 31337'
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    networks:
+      - mevshield
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # One-shot contract deployment
+  # -------------------------------------------------------------------------
+  contracts-deploy:
+    <<: *contracts-image
+    container_name: mevshield-contracts-deploy
+    depends_on:
+      anvil:
+        condition: service_healthy
+    environment:
+      ANVIL_RPC_URL: "http://anvil:8545"
+      DEPLOYMENTS_DIR: "/deployments"
+      # anvil account #0. Publicly known development key. LOCAL ONLY.
+      DEPLOYER_PRIVATE_KEY: "${DEPLOYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+      # Expectations pinned to the deterministic deployment. A drift fails the
+      # deploy instead of starting a half-wired stack.
+      EXPECTED_POOL_MANAGER: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      EXPECTED_POLICY_REGISTRY: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+      EXPECTED_POLICY_VERIFIER: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+      EXPECTED_POLICY_AUTHORIZATION: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      EXPECTED_MEVSHIELD_HOOK: "0x1e2F391574556815aE705895F2728543A7AD4080"
+      EXPECTED_MEVSHIELD_ROUTER: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
+      EXPECTED_AUTHORIZED_SIGNER: "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7"
+      EXPECTED_TOKEN_A: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+      EXPECTED_TOKEN_B: "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e"
+      EXPECTED_POOL_ID: "0x8d754c8c3f0e991efb877b18bf00b8d0718c2cd8af8f31a35c61de1415e19bf0"
+    volumes:
+      # Source is mounted read-write because forge writes broadcast/ and cache/
+      # into the working directory. Those paths are gitignored.
+      - .:/work
+      - deployments:/deployments
+    working_dir: /work
+    entrypoint: ["/bin/bash", "-lc"]
+    command: ["/work/script/docker-deploy-local.sh"]
+    networks:
+      - mevshield
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # Backend API
+  # -------------------------------------------------------------------------
+  backend:
+    image: mevshield/backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mevshield-backend
+    depends_on:
+      anvil:
+        condition: service_healthy
+      contracts-deploy:
+        condition: service_completed_successfully
+    environment:
+      PORT: "4000"
+      # development is what opens the local-chain gate. Production would refuse
+      # chain 31337, which is the intended behaviour on a real deployment.
+      NODE_ENV: development
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+
+      # The explicit local gate. Requires a non-production NODE_ENV too.
+      MEVSHIELD_LOCAL_CHAIN_ENABLED: "true"
+      CHAIN_ID: "31337"
+
+      # Policy signing. Enabled here so the full policy flow is exercised
+      # locally. The signer key is anvil's published development key and matches
+      # the signer DeployLocal installs on the PolicyVerifier (0xA11CE).
+      MEVSHIELD_V2_POLICY_ENABLED: "${MEVSHIELD_V2_POLICY_ENABLED:-true}"
+      MEVSHIELD_SEPOLIA_DEMO_ENABLED: "false"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-0x00000000000000000000000000000000000000000000000000000000000a11ce}"
+
+      # Deployed addresses. The backend pins these exact values on the local
+      # chain, so a drift fails startup rather than serving a mismatch.
+      POLICY_VERIFIER_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+      VERIFIER_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+      ROUTER_ADDRESS: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
+
+      # Protected pool, from SetupBackendSwap.
+      PROTECTED_POOL_CURRENCY0: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+      PROTECTED_POOL_CURRENCY1: "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e"
+      PROTECTED_POOL_FEE: "3000"
+      PROTECTED_POOL_TICK_SPACING: "60"
+      PROTECTED_POOL_HOOK: "0x1e2F391574556815aE705895F2728543A7AD4080"
+      PROTECTED_POOL_ID: "0x8d754c8c3f0e991efb877b18bf00b8d0718c2cd8af8f31a35c61de1415e19bf0"
+
+      # Event monitor. Same local chain, so it follows anvil blocks.
+      RPC_URL: "http://anvil:8545"
+      SEPOLIA_RPC_URL: ""
+      POLICY_REGISTRY_ADDRESS: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+      HOOK_ADDRESS: "0x1e2F391574556815aE705895F2728543A7AD4080"
+
+      # Single allowed CORS origin: the frontend container.
+      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:5173}"
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    networks:
+      - mevshield
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Frontend (static build served by nginx)
+  # -------------------------------------------------------------------------
+  frontend:
+    image: mevshield/frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Reached from the browser, so it must be the host-published port, not
+        # the compose service name.
+        VITE_API_URL: "${VITE_API_URL:-http://localhost:4000}"
+        VITE_CHAIN_ID: "31337"
+        VITE_RPC_URL: "${VITE_RPC_URL:-http://localhost:8545}"
+        VITE_EXPLORER_URL: ""
+        # Demo signing stays off: it requires a Vite dev server and signs a
+        # meaningless 1-base-unit minimum output.
+        VITE_SEPOLIA_DEMO_MODE: "false"
+        # The execute gate. Deliberately false here as everywhere else.
+        VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED: "${VITE_MINIMUM_OUTPUT_V2_DEPLOYMENT_VERIFIED:-false}"
+
+        VITE_POOL_MANAGER_ADDRESS: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+        VITE_POLICY_REGISTRY_ADDRESS: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+        VITE_POLICY_VERIFIER_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+        VITE_POLICY_AUTHORIZATION_ADDRESS: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+        VITE_MEVSHIELD_HOOK_ADDRESS: "0x1e2F391574556815aE705895F2728543A7AD4080"
+        VITE_MEVSHIELD_ROUTER_ADDRESS: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318"
+        VITE_AUTHORIZED_SIGNER_ADDRESS: "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7"
+
+        VITE_TOKEN0_ADDRESS: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788"
+        VITE_TOKEN1_ADDRESS: "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e"
+        VITE_TOKEN0_SYMBOL: "MBA"
+        VITE_TOKEN1_SYMBOL: "MBB"
+    container_name: mevshield-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # 5173 matches the backend's default CORS origin and the Vite dev port, so
+      # the same URL works whether you run the dev server or this container.
+      - "${FRONTEND_PORT:-5173}:8080"
+    networks:
+      - mevshield
+    restart: unless-stopped
+
+# ---------------------------------------------------------------------------
+# Volumes and network
+# ---------------------------------------------------------------------------
+volumes:
+  # Deployed addresses written by contracts-deploy, readable for inspection:
+  #   docker compose run --rm contracts-deploy cat /deployments/local.json
+  # Cleared by `docker compose down -v`.
+  deployments:
+
+networks:
+  mevshield:
+    driver: bridge

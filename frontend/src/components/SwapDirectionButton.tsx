@@ -3,16 +3,13 @@ type SwapDirectionButtonProps = {
   onSwitchDirection: () => void;
 };
 
+/** Sits between the pay and receive rows, as the mockup's direction control. */
 export default function SwapDirectionButton({
   routeDirection,
   onSwitchDirection,
 }: SwapDirectionButtonProps) {
   return (
-    <button
-      className="swap-direction"
-      type="button"
-      onClick={onSwitchDirection}
-    >
+    <button className="direction" type="button" onClick={onSwitchDirection}>
       Switch direction · {routeDirection}
     </button>
   );

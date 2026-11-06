@@ -1,4 +1,5 @@
-import { calculateRisk } from "../risk/riskEngine.js";
+import type { ActivePoolState } from "../risk/poolState.js";
+import { calculateRisk, type RiskLevel } from "../risk/riskEngine.js";
 import type { Policy } from "./policy.js";
 
 export interface PolicyRequest {
@@ -12,15 +13,21 @@ export interface PolicyRequest {
   minAmountOut: bigint;
 }
 
-export function generatePolicy(request: PolicyRequest): {
+export function generatePolicy(
+  request: PolicyRequest,
+  pool: ActivePoolState,
+): {
   policy: Policy;
   estimatedLoss: bigint;
   estimatedFee: bigint;
-  riskLevel: "LOW" | "MEDIUM" | "HIGH";
+  riskLevel: RiskLevel;
 } {
   const risk = calculateRisk({
     amountSpecified: request.amountSpecified,
-    zeroForOne: request.zeroForOne
+    zeroForOne: request.zeroForOne,
+    sqrtPriceX96: pool.sqrtPriceX96,
+    liquidity: pool.liquidity,
+    feePips: pool.feePips,
   });
 
   const policy: Policy = {

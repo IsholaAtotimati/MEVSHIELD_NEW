@@ -1,0 +1,39 @@
+# Build context for the contracts toolchain image (context is the repo root).
+#
+# Foundry needs src/, script/, test/, foundry.toml and lib/. Everything else is
+# excluded so the context stays small and local secrets never enter a layer.
+
+# Compiler output and local build state. Rebuilt inside the image.
+out
+cache
+broadcast
+
+# Dependencies are installed inside their own images.
+node_modules
+**/node_modules
+
+# Contract-specific: forge-std and friends are submodules, handled explicitly.
+# `.git` is excluded but `.gitmodules` is not, so `SUBMODULE_MODE=fetch` works.
+.git
+.gitignore
+.gitattributes
+
+# Local environment files. DEPLOYER_PRIVATE_KEY must never be in the context.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Not part of the contracts build.
+frontend
+backend
+docs
+.github
+.vscode
+.idea
+.DS_Store
+
+# Local anvil state and scratch files.
+anvil-state
+.mevshield
+*.log

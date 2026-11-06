@@ -1,39 +1,20 @@
 import { Wallet } from "ethers";
+
 import type { Policy } from "../policy/policy.js";
+import {
+  POLICY_TYPES,
+  policyDomain,
+  type PolicyDomainConfig,
+} from "../policy/eip712.js";
 
-export interface SignerConfig {
-  chainId: number;
-  verifyingContract: string;
-}
-
-const TYPES = {
-  Policy: [
-    { name: "poolId", type: "bytes32" },
-    { name: "trader", type: "address" },
-    { name: "nonce", type: "uint256" },
-    { name: "expiry", type: "uint256" },
-    { name: "maxLoss", type: "uint256" },
-    { name: "maxFee", type: "uint256" },
-    { name: "zeroForOne", type: "bool" },
-    { name: "amountSpecified", type: "int256" },
-    { name: "sqrtPriceLimitX96", type: "uint160" },
-    { name: "minAmountOut", type: "uint256" }
-  ]
-};
+export type SignerConfig = PolicyDomainConfig;
 
 export async function signPolicy(
   wallet: Wallet,
   policy: Policy,
   config: SignerConfig
 ): Promise<string> {
-  const domain = {
-    name: "MEVShield",
-    version: "1",
-    chainId: config.chainId,
-    verifyingContract: config.verifyingContract
-  };
-
-  return wallet.signTypedData(domain, TYPES, {
+  return wallet.signTypedData(policyDomain(config), POLICY_TYPES, {
     poolId: policy.poolId,
     trader: policy.trader,
     nonce: policy.nonce,
@@ -47,6 +28,10 @@ export async function signPolicy(
   });
 }
 
+/**
+ * Retained for callers that need the field list to verify a signature.
+ * @deprecated Import `POLICY_TYPES` from `../policy/eip712.js` instead.
+ */
 export function getPolicyTypes() {
-  return TYPES;
+  return POLICY_TYPES;
 }

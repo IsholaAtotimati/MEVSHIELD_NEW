@@ -137,6 +137,28 @@ export const mevShieldRouterAbi = [
     inputs: [],
   },
   {
+    type: "error",
+    name: "InvalidPriceLimit",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "PriceLimitTooFar",
+    inputs: [
+      { name: "currentTick", type: "int24" },
+      { name: "limitTick", type: "int24" },
+      { name: "maxDistance", type: "uint24" },
+    ],
+  },
+  {
+    type: "error",
+    name: "MinimumOutputNotMet",
+    inputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "minAmountOut", type: "uint256" },
+    ],
+  },
+  {
     type: "function",
     name: "executeSwap",
     stateMutability: "payable",
@@ -216,5 +238,57 @@ export const mevShieldHookAbi = [
     outputs: [
       { name: "", type: "address" },
     ],
+  },
+  {
+    type: "event",
+    name: "SwapPolicyEnforced",
+    inputs: [
+      { name: "poolId", type: "bytes32", indexed: true },
+      { name: "trader", type: "address", indexed: true },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "maxLoss", type: "uint256", indexed: false },
+      { name: "maxFee", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+export const policyRegistryEventsAbi = [
+  {
+    type: "event",
+    name: "PolicyRegistered",
+    inputs: [
+      { name: "policyId", type: "bytes32", indexed: true },
+      { name: "poolId", type: "bytes32", indexed: true },
+      { name: "trader", type: "address", indexed: true },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "expiry", type: "uint256", indexed: false },
+      { name: "maxLoss", type: "uint256", indexed: false },
+      { name: "maxFee", type: "uint256", indexed: false },
+      { name: "minAmountOut", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+export const weth9Abi = [
+  {
+    type: "function",
+    name: "deposit",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "wad", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
   },
 ] as const;

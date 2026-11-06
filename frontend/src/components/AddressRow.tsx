@@ -5,14 +5,12 @@ type AddressRowProps = {
   address: Address | null;
 };
 
-export default function AddressRow({
-  name,
-  address,
-}: AddressRowProps) {
+/** One contract address, labelled, in the mono face. */
+export default function AddressRow({ name, address }: AddressRowProps) {
   return (
     <div className="address-row">
       <span>{name}</span>
-      <code>{address ?? "Loading..."}</code>
+      <code className="mono">{address ?? "Loading..."}</code>
     </div>
   );
 }

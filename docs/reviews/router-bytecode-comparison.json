@@ -1,0 +1,89 @@
+{
+  "router": "0x633282608B2fc66cD7572f5eF58e804063aa150D",
+  "deployedHexFile": "docs/reviews/deployed-router-6332.hex",
+  "deployedByteLen": 5667,
+  "selectorsOnDeployed": {
+    "protectedPoolId": "absent",
+    "protectedHook": "absent",
+    "poolManager": "present"
+  },
+  "comparisons": [
+    {
+      "label": "MEVShieldRouter.sol",
+      "artifactPath": "out/MEVShieldRouter.sol/MEVShieldRouter.json",
+      "localByteLen": 5667,
+      "deployedByteLen": 5667,
+      "rawMatch": false,
+      "normalizedMatch": true,
+      "firstDiffNormalized": null,
+      "immutableSlotsMasked": 5,
+      "cborStripped": {
+        "local": true,
+        "deployed": true
+      },
+      "selectorsOnDeployed": {
+        "protectedPoolId": "absent",
+        "protectedHook": "absent",
+        "poolManager": "present"
+      },
+      "selectorsOnLocal": {
+        "protectedPoolId": "absent",
+        "protectedHook": "absent",
+        "poolManager": "present"
+      }
+    },
+    {
+      "label": "MEVShieldRouter.sol",
+      "artifactPath": "/tmp/mevshield-wt-027c927/out/MEVShieldRouter.sol/MEVShieldRouter.json",
+      "localByteLen": 3029,
+      "deployedByteLen": 5667,
+      "rawMatch": false,
+      "normalizedMatch": false,
+      "firstDiffNormalized": {
+        "byteOffset": 45,
+        "local": "05",
+        "deployed": "0e"
+      },
+      "immutableSlotsMasked": 5,
+      "cborStripped": {
+        "local": true,
+        "deployed": true
+      },
+      "selectorsOnDeployed": {
+        "protectedPoolId": "absent",
+        "protectedHook": "absent",
+        "poolManager": "present"
+      },
+      "selectorsOnLocal": {
+        "protectedPoolId": "absent",
+        "protectedHook": "absent",
+        "poolManager": "present"
+      }
+    },
+    {
+      "label": "MEVShieldRouter.sol",
+      "artifactPath": "/tmp/mevshield-wt-ae3cc4f/out/MEVShieldRouter.sol/MEVShieldRouter.json",
+      "localByteLen": 5667,
+      "deployedByteLen": 5667,
+      "rawMatch": false,
+      "normalizedMatch": true,
+      "firstDiffNormalized": null,
+      "immutableSlotsMasked": 5,
+      "cborStripped": {
+        "local": true,
+        "deployed": true
+      },
+      "selectorsOnDeployed": {
+        "protectedPoolId": "absent",
+        "protectedHook": "absent",
+        "poolManager": "present"
+      },
+      "selectorsOnLocal": {
+        "protectedPoolId": "absent",
+        "protectedHook": "absent",
+        "poolManager": "present"
+      }
+    }
+  ],
+  "generatedAt": "2026-10-28T08:25:11.022Z"
+}
