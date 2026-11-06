@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assessProtectedPool,
+  backendQuoteToProtectedQuote,
   calculateDemoOutput,
   calculateMinimumOutput,
   calculatePoolId,
@@ -349,5 +350,87 @@ test("frontend verifies every backend pool-key field, chain, and pool ID", () =>
       expected,
     ),
     false,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// backendQuoteToProtectedQuote: POST /quote response into an available quote
+// ---------------------------------------------------------------------------
+
+const BACKEND_QUOTE_BODY = {
+  poolId: poolId,
+  amountSpecified: "-1000000",
+  zeroForOne: true,
+  amountOutBaseUnits: "996999",
+  feePips: "3000",
+  model: "active-tick-estimate",
+  disclaimer: "Estimates the swap output...",
+};
+
+test("parses a valid backend quote body into an available quote", () => {
+  const quotedAtMs = 123_456;
+  const quote = backendQuoteToProtectedQuote(BACKEND_QUOTE_BODY, {
+    poolId: poolId,
+    amountSpecified: 1_000_000n,
+    quotedAtMs,
+  });
+  assert.notEqual(quote, null);
+  assert.equal(quote.status, "available");
+  assert.equal(quote.poolId, poolId);
+  assert.equal(quote.amountInBaseUnits, 1_000_000n);
+  assert.equal(quote.amountOutBaseUnits, 996_999n);
+  assert.equal(quote.quotedAtMs, 123_456);
+});
+
+test("rejects a backend quote for a different pool", () => {
+  const quote = backendQuoteToProtectedQuote(BACKEND_QUOTE_BODY, {
+    poolId: "0x" + "11".repeat(32),
+    amountSpecified: 1_000_000n,
+    quotedAtMs: now,
+  });
+  assert.equal(quote, null);
+});
+
+test("rejects a backend quote for a different amount", () => {
+  const quote = backendQuoteToProtectedQuote(BACKEND_QUOTE_BODY, {
+    poolId: poolId,
+    amountSpecified: 2_000_000n,
+    quotedAtMs: now,
+  });
+  assert.equal(quote, null);
+});
+
+test("rejects a backend quote with a non-positive output", () => {
+  for (const amountOut of ["0", "-5", "12.5", "", "abc"]) {
+    const quote = backendQuoteToProtectedQuote(
+      { ...BACKEND_QUOTE_BODY, amountOutBaseUnits: amountOut },
+      { poolId: poolId, amountSpecified: 1_000_000n, quotedAtMs: now },
+    );
+    assert.equal(quote, null, `amountOutBaseUnits ${JSON.stringify(amountOut)} must be rejected`);
+  }
+});
+
+test("rejects a malformed backend quote body", () => {
+  for (const body of [null, undefined, {}, [], "ok", 42]) {
+    assert.equal(
+      backendQuoteToProtectedQuote(body, { poolId: poolId, amountSpecified: 1_000_000n, quotedAtMs: now }),
+      null,
+      `body ${JSON.stringify(body)} must be rejected`,
+    );
+  }
+});
+
+test("rejects a body whose amountSpecified or poolId is missing", () => {
+  const noAmount = { ...BACKEND_QUOTE_BODY };
+  delete noAmount.amountSpecified;
+  assert.equal(
+    backendQuoteToProtectedQuote(noAmount, { poolId: poolId, amountSpecified: 1_000_000n, quotedAtMs: now }),
+    null,
+  );
+  const noPoolId = { ...BACKEND_QUOTE_BODY };
+  delete noPoolId.poolId;
+  assert.equal(
+    backendQuoteToProtectedQuote(noPoolId, { poolId: poolId, amountSpecified: 1_000_000n, quotedAtMs: now }),
+    null,
   );
 });

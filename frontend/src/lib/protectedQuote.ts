@@ -309,6 +309,51 @@ export function isFreshDemoPoolReadiness(
   );
 }
 
+/**
+ * Parse a `POST /quote` response body into an available quote.
+ *
+ * Every field is validated against what this client asked for: the pool id,
+ * the exact input amount, and a positive integer output. Anything else is a
+ * `null` — the caller treats a null the same as no quote, so a backend that
+ * drifts never becomes a number the UI trusts.
+ */
+export function backendQuoteToProtectedQuote(
+  body: unknown,
+  expected: { poolId: Hex; amountSpecified: bigint; quotedAtMs: number },
+): ProtectedQuote | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return null;
+  }
+  const record = body as Record<string, unknown>;
+  if (
+    typeof record.poolId !== "string" ||
+    !/^0x[0-9a-fA-F]{64}$/.test(record.poolId) ||
+    record.poolId.toLowerCase() !== expected.poolId.toLowerCase()
+  ) {
+    return null;
+  }
+  if (
+    typeof record.amountSpecified !== "string" ||
+    record.amountSpecified !== `-${expected.amountSpecified}`
+  ) {
+    return null;
+  }
+  if (
+    typeof record.amountOutBaseUnits !== "string" ||
+    !/^\d+$/.test(record.amountOutBaseUnits) ||
+    BigInt(record.amountOutBaseUnits) <= 0n
+  ) {
+    return null;
+  }
+  return {
+    status: "available",
+    poolId: expected.poolId,
+    amountInBaseUnits: expected.amountSpecified,
+    amountOutBaseUnits: BigInt(record.amountOutBaseUnits),
+    quotedAtMs: expected.quotedAtMs,
+  };
+}
+
 export function calculateSwapReadiness(input: {
   amountInBaseUnits: bigint | null;
   quote: ProtectedQuote;
