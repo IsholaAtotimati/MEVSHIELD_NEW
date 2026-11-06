@@ -93,3 +93,4 @@ I push both remotes with one command, `./script/push-both.sh`. It sends the curr
 3. `/trade` is the swap console and the top bar reads `Sepolia · 11155111`.
 4. A request from the site origin to `/health` includes `Access-Control-Allow-Origin` for that origin.
 5. `POST /policy` returns 503.
+6. `POST /quote` with `{"amountSpecified":"-1000000","zeroForOne":true}` answers 200 with `model: "active-tick-estimate"` when the pool holds liquidity, and 503 `quote_unavailable` with `details.reason: "no-liquidity"` while it does not. The converter on the trade page fills in only from the first case.

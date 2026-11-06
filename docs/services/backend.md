@@ -11,6 +11,7 @@ Source: `backend/src`. Entry point: [backend/src/server.ts](../../backend/src/se
 | Configuration | `config/runtimeConfig.ts`, `config/env.ts` | Validates every startup variable, pins the deployment, derives the pool id. `env.ts` owns the alias precedence for variables that were renamed |
 | HTTP errors | `http/apiError.ts` | Builds every 400, 404, 500 and 503 body from one place so status, `code`, `error` and `requestId` stay in sync |
 | Risk | `risk/riskEngine.ts`, `risk/riskPreview.ts` | The closed-form estimate and the request schema for `/risk-preview` |
+| Quote | `risk/quote.ts`, `risk/tickMath.ts` | The active-tick output estimate and request schema for `/quote`, plus the TickMath port for boundary prices |
 | Policy | `policy/policy.ts`, `policy/policyGenerator.ts`, `policy/policyRequest.ts`, `policy/policySigning.ts` | The policy value type, the request schema for `/policy`, policy assembly, and the guarded signing call |
 | EIP-712 | `policy/eip712.ts` | The single off-chain declaration: domain name and version, ordered field list, type string, type hash |
 | Signer | `signer/policySigner.ts` | `signTypedData` over the shared declaration |
@@ -141,6 +142,10 @@ maxFee = estimatedFee * 2
 The frontend validator accepts `LOW`, `MEDIUM`, and `HIGH` ([frontend/src/lib/apiValidation.ts:102](../../frontend/src/lib/apiValidation.ts#L102)).
 
 The same function feeds `/risk-preview`, which returns the estimate directly, and `/policy`, which writes `maxLoss` and `maxFee` into the signed policy. Those caps are twice the estimates. The hook compares them with the numbers the caller puts in `hookData`. It does not measure this loss. The response `model` is `active-liquidity-impact`. The disclaimer says the estimate uses the current pool state for this trade size and does not read the mempool or detect sandwich attacks.
+
+## Quote estimate
+
+`quoteWithinActiveTick` prices an exact-input swap from the same pool read (`backend/src/risk/quote.ts`). It applies the pool fee, then the constant-product formula from `sqrtPriceX96` to a boundary one tick-spacing step away from the packed slot0 tick — never assuming an initialized tick at the current price is crossable. The output is floored, so rounding is conservative. Two refusals exist instead of guesses: `no-liquidity` when active liquidity is zero, and `exceeds-active-tick` when the post-fee input exceeds the depth to the boundary. The route is `POST /quote`; the response `model` is `active-tick-estimate`, and the full contract is in [the API reference](../api/reference.md#post-quote). It is not a quoter simulation: it does not walk initialized ticks. A real `V4Quoter` beside this repository's PoolManager remains the production hardening step.
 
 ## Signing
 

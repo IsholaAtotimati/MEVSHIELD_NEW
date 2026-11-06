@@ -12,7 +12,8 @@ Source: [backend/src/server.ts](../../backend/src/server.ts).
 | --- | --- | --- | --- | --- |
 | GET | `/health` | none | 200 | none |
 | GET | `/config/protected-pool` | none | 200 | none |
-| POST | `/risk-preview` | none | 200 | 400 |
+| POST | `/risk-preview` | none | 200 | 400, 503 |
+| POST | `/quote` | none | 200 | 400, 503 |
 | POST | `/policy` | none, gated by a 503 feature flag | 200 | 400, 500, 503 |
 | POST | `/observability/transaction` | none | 202 | 400 |
 | any | any other path or method | none | none | 404 |
@@ -205,6 +206,67 @@ All numeric fields are strings to avoid JavaScript precision loss. The values ar
 Each row carries `requestId`. See [Error body shape](#error-body-shape).
 
 Source: [backend/src/server.ts:133](../../backend/src/server.ts#L133).
+
+---
+
+## POST /quote
+
+Returns the output estimate for an exact-input swap against the protected pool, priced while the trade stays inside the active tick. Does not sign, register, or submit. It reads pool state over RPC, exactly as `/risk-preview` does. A trade larger than the active tick's depth is refused with `503` rather than priced across unverified ticks, and a pool with zero active liquidity is refused rather than divided by zero.
+
+The estimate applies the pool fee, then the constant-product swap formula from `sqrtPriceX96` to the boundary one tick-spacing step away (never assuming an initialized tick at the current price is crossable). All integer math floors the output, so rounding is conservative.
+
+### Request body
+
+```json
+{
+  "amountSpecified": "-1000000",
+  "zeroForOne": true
+}
+```
+
+| Field | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `amountSpecified` | string | yes | Must match `^-?\d{1,78}$` **and** be negative. It is the exact input in the pay token's base units, signed negative to match the policy convention |
+| `zeroForOne` | boolean | yes | Strict boolean. `true` sells `currency0` (USDC), `false` sells `currency1` (WETH) |
+
+The schema extends the `/risk-preview` body with the negative-amount refinement, checked in a `superRefine` with a guarded `BigInt` conversion ([backend/src/server.ts](../../backend/src/server.ts)). A non-numeric string is a `400 invalid_quote`, not a thrown error.
+
+### Response 200
+
+```json
+{
+  "poolId": "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602",
+  "amountSpecified": "-1000000",
+  "zeroForOne": true,
+  "amountOutBaseUnits": "996999",
+  "feePips": "3000",
+  "model": "active-tick-estimate",
+  "disclaimer": "Estimates the swap output from the current pool state while the trade stays inside the active tick. It refuses a larger trade instead of pricing across unverified ticks, and it is not an execution guarantee."
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `poolId` | bytes32 string | The configured protected pool, echoed |
+| `amountSpecified` | decimal string | Echoed |
+| `zeroForOne` | boolean | Echoed |
+| `amountOutBaseUnits` | decimal string | The estimate, in the receive token's base units. True value floors here; a constant-product rearrangement would land one unit higher |
+| `feePips` | decimal string | The fee actually applied: slot0's dynamic fee when set, otherwise the configured pool fee |
+| `model` | string | Always `"active-tick-estimate"` |
+| `disclaimer` | string | Fixed text, stated above |
+
+### Errors
+
+| Status | `code` | `error` | Cause |
+| --- | --- | --- | --- |
+| 400 | `invalid_quote` | `Invalid quote request` | Schema validation failed, including a non-negative or non-numeric `amountSpecified`. `details` is the Zod issue array |
+| 503 | `pool_state_unavailable` | The `PoolStateUnavailableError` message | RPC missing, pool uninitialized, or the slot0 / liquidity read failed |
+| 503 | `quote_unavailable` | The refusal message | `details.reason` is `no-liquidity` (zero active liquidity) or `exceeds-active-tick` (input larger than the active tick's depth) |
+| 500 | `internal_error` | `Internal error` | Any other thrown error |
+
+Each row carries `requestId`. See [Error body shape](#error-body-shape).
+
+Source: [backend/src/server.ts](../../backend/src/server.ts) (`POST /quote` handler), [backend/src/risk/quote.ts](../../backend/src/risk/quote.ts).
 
 ---
 
@@ -453,12 +515,15 @@ Every non-2xx response is built by one helper, `sendApiError`, so the shape is i
 | `invalid_json` | 400 | The request body was not parseable JSON |
 | `invalid_request` | 400 | Schema validation failed, or the telemetry event schema rejected the body |
 | `invalid_preview` | 400 | The risk-preview body failed schema validation, or the amount was zero |
+| `invalid_quote` | 400 | The quote body failed schema validation, or `amountSpecified` was not negative |
 | `invalid_pool` | 400 | `poolId` is not the configured protected pool |
 | `invalid_trader` | 400 | `trader` is not the configured router |
 | `invalid_minimum_output` | 400 | The minimum-output rule for the active mode was violated |
 | `not_found` | 404 | No route matched the method and path |
 | `policy_signing_disabled` | 503 | The `POST /policy` feature gate is closed |
 | `signer_unavailable` | 503 | Signing is enabled but no signer wallet was loaded |
+| `pool_state_unavailable` | 503 | The pool state read failed (also returned by `/quote`) |
+| `quote_unavailable` | 503 | `/quote` refused: no active liquidity, or the trade exceeds the active tick |
 | `internal_error` | 500 | An unexpected error was thrown while handling a policy request |
 
 #### 400 Bad request

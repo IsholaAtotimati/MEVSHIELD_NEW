@@ -42,7 +42,7 @@ Both legs of the pool are ERC-20. The "ETH" entry in the token selector is WETH9
 | Route authorization verified | True when the registry consumer equals the authorization contract | Blocks on a mismatch |
 | Policy bounds verified | Only after a registered policy exists | Blocks `canExecute` until a policy is registered |
 
-Two of these are structurally closed: the quote gate, because no quoter exists, and the deployment-verified flag, because it is set to false on purpose. Demo mode substitutes a fixed-rate estimate for the quote but does not substitute for the deployment flag.
+Two of these are structurally closed: the deployment-verified flag, because it is set to false on purpose, and — until the pool holds active liquidity — the quote gate, because a pool with no liquidity has nothing to quote against. The quote itself now comes from the backend's active-tick estimate (`POST /quote`): exact inside the current tick, refused when the trade would cross an unverified tick. A real V4 Quoter beside this repository's PoolManager remains the production hardening step. Demo mode substitutes a fixed-rate estimate for the quote but does not substitute for the deployment flag.
 
 ## Enforcement on the execution path
 

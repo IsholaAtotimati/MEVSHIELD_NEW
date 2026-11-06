@@ -95,9 +95,9 @@ The context also owns the inputs that reset the flow: `inputToken`, `outputToken
 | 8 | `stale-pool-state` | Observation time is in the future, or older than 15 seconds |
 | 9 | `uninitialized-pool` | `sqrtPriceX96` is zero |
 | 10 | `zero-active-liquidity` | Active liquidity is zero |
-| 11 | `quote-simulation-unavailable` | Always, at present |
+| 11 | `quote-simulation-unavailable` | Always, from `assessProtectedPool` itself |
 
-Step 11 is not a bug in the ordering. The function ends by returning `quote-simulation-unavailable` unconditionally, with the comment that pool spot state cannot reproduce tick traversal, fees and router effects ([frontend/src/lib/protectedQuote.ts:260](../../frontend/src/lib/protectedQuote.ts#L260)). There is no quoter integration, so an `available` quote is never produced by this build. The `available` variant exists in the type, and the tests construct one directly, but runtime code cannot reach it.
+Step 11 is not a bug in the ordering. The function ends by returning `quote-simulation-unavailable` unconditionally, with the comment that pool spot state cannot reproduce tick traversal, fees and router effects ([frontend/src/lib/protectedQuote.ts:260](../../frontend/src/lib/protectedQuote.ts#L260)). `assessProtectedPool` is the pool-health leg; an `available` quote comes from the backend instead. `POST /quote` prices the swap from the same pool state while it stays inside the active tick, and `backendQuoteToProtectedQuote` ([frontend/src/lib/protectedQuote.ts](../../frontend/src/lib/protectedQuote.ts)) converts the response into the `available` variant after checking the pool id and the exact input amount. Every consumer of `isQuoteFresh` reads that backend quote; a refused or drifted response becomes no quote.
 
 `loadProtectedPoolQuote` wraps the same assessment and converts a thrown RPC error into `rpc-failure` ([frontend/src/lib/protectedQuote.ts:268](../../frontend/src/lib/protectedQuote.ts#L268)).
 
@@ -185,7 +185,8 @@ Frontend logs are JSON lines on the browser console, prefixed with `service: "me
 
 ## Known limitations
 
-- `assessProtectedPool` still ends at `quote-simulation-unavailable` once the pool snapshot is fresh, because spot state is not a swap simulation. Outside demo mode that blocks Check protection. Demo mode fills the receive field from the deterministic estimate. On chain 31337 a production bundle may use that estimate. On Sepolia, demo mode still requires the Vite dev server. See `resolveDemoMode` in `frontend/src/config/chainEnv.ts` and [local test flow](../runbook/local-test-flow.md).
+- `assessProtectedPool` still ends at `quote-simulation-unavailable` once the pool snapshot is fresh, because spot state is not a swap simulation. That is the pool-health leg only. The real quote comes from `POST /quote`, an active-tick estimate: exact inside the current tick, refused (`quote_unavailable`) when the trade would cross an unverified tick or the pool has no active liquidity. It is not a quoter simulation — it does not walk initialized ticks, and the execute gate stays closed regardless. See [POST /quote](../api/reference.md#post-quote).
+- The pool read on the backend has no quoter simulation either. Until a V4 Quoter is deployed next to this repository's PoolManager, every quote is the active-tick estimate, and large trades that cross ticks are refused rather than mispriced.
 - The expiry the UI requests comes from `buildPolicyExpiry` in [frontend/src/config/policy.ts](../../frontend/src/config/policy.ts), which adds `POLICY_TTL_SECONDS` (10 minutes) to the current clock ([frontend/src/hooks/usePolicy.ts:305](../../frontend/src/hooks/usePolicy.ts#L305)). The file also exports `POLICY_MAX_TTL_SECONDS`, a copy of the backend ceiling, so the client can assert its request stays inside it. The backend constant remains the source of truth; the copy is a mirror, and `frontend/src/config/policy.test.mjs` catches drift between the two at test time rather than at runtime.
 - The pool-state reader depends on PoolManager storage slots computed by hand.
 - The default read RPC is a public unauthenticated Sepolia endpoint. `VITE_RPC_URL` can replace it, and the UI's notion of pool state inherits that endpoint's availability and correctness.
