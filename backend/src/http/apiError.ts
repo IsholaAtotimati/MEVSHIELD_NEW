@@ -23,6 +23,7 @@ export type ApiErrorCode =
   | "invalid_json"
   | "invalid_request"
   | "invalid_preview"
+  | "invalid_quote"
   | "invalid_pool"
   | "invalid_trader"
   | "invalid_minimum_output"
@@ -30,6 +31,7 @@ export type ApiErrorCode =
   | "policy_signing_disabled"
   | "signer_unavailable"
   | "pool_state_unavailable"
+  | "quote_unavailable"
   | "internal_error";
 
 export type ApiErrorBody = {

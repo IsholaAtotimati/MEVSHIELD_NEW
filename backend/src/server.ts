@@ -252,7 +252,7 @@ export function createApp(deps: AppDependencies): Express {
           result.error === "no-liquidity"
             ? "The protected pool has no active liquidity, so no quote is possible."
             : "The trade does not stay inside the pool's active tick, so the estimate refuses to misprice it.",
-          { reason: result.error },
+          { details: { reason: result.error } },
         );
       }
 
