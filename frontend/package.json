@@ -8,7 +8,7 @@
     "demo": "vite --mode demo",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/lib/networkVerification.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs src/lib/minimumOutputVerification.test.mjs",
+    "test": "node --experimental-strip-types --test src/lib/protectedQuote.test.mjs src/lib/apiValidation.test.mjs src/lib/format.test.mjs src/lib/statusTone.test.mjs src/lib/shieldReport.test.mjs src/lib/networkVerification.test.mjs src/config/policy.test.mjs src/config/chainEnv.test.mjs src/lib/minimumOutputVerification.test.mjs src/lib/quoteRequest.test.mjs src/lib/tradeActionReadiness.test.mjs src/lib/policyExecutionReadiness.test.mjs src/lib/allowance.test.mjs src/hooks/useWallet.test.mjs src/hooks/lifecycleOrder.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -14,16 +14,11 @@ contract InspectVerifiedCurrentSepoliaPool is Script {
     using StateLibrary for IPoolManager;
 
     uint256 private constant SEPOLIA_CHAIN_ID = 11155111;
-    address private constant POOL_MANAGER =
-        0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address private constant USDC =
-        0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
-    address private constant WETH =
-        0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address private constant HOOK =
-        0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
-    bytes32 private constant EXPECTED_POOL_ID =
-        0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+    address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+    address private constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
+    address private constant HOOK = 0x15D8C5eb1b839A4Fd86989348c1371c10168c080;
+    bytes32 private constant EXPECTED_POOL_ID = 0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235;
 
     function run() external view {
         require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain");
@@ -31,12 +26,7 @@ contract InspectVerifiedCurrentSepoliaPool is Script {
         require(POOL_MANAGER.code.length != 0, "PoolManager has no code");
         require(HOOK.code.length != 0, "hook has no code");
 
-        require(
-            address(
-                IProtectedHookInspector(HOOK).poolManager()
-            ) == POOL_MANAGER,
-            "hook PoolManager mismatch"
-        );
+        require(address(IProtectedHookInspector(HOOK).poolManager()) == POOL_MANAGER, "hook PoolManager mismatch");
 
         PoolKey memory key = PoolKey({
             currency0: Currency.wrap(USDC),
@@ -47,13 +37,9 @@ contract InspectVerifiedCurrentSepoliaPool is Script {
         });
 
         PoolId poolId = key.toId();
-        require(
-            PoolId.unwrap(poolId) == EXPECTED_POOL_ID,
-            "pool ID mismatch"
-        );
+        require(PoolId.unwrap(poolId) == EXPECTED_POOL_ID, "pool ID mismatch");
 
-        (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee) =
-            manager.getSlot0(poolId);
+        (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee) = manager.getSlot0(poolId);
         uint128 activeLiquidity = manager.getLiquidity(poolId);
 
         console2.log("READ-ONLY CURRENT SEPOLIA POOL INSPECTION");

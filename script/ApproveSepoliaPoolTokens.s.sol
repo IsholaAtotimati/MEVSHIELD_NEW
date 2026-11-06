@@ -5,29 +5,20 @@ import {Script, console2} from "forge-std/Script.sol";
 
 interface IERC20LimitedApproval {
     function balanceOf(address owner) external view returns (uint256);
-    function allowance(address owner, address spender)
-        external
-        view
-        returns (uint256);
-    function approve(address spender, uint256 amount)
-        external
-        returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
 }
 
 contract ApproveSepoliaPoolTokens is Script {
     uint256 internal constant SEPOLIA_CHAIN_ID = 11155111;
 
-    address internal constant EXPECTED_OWNER =
-        0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
+    address internal constant EXPECTED_OWNER = 0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
 
-    address internal constant USDC =
-        0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+    address internal constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
 
-    address internal constant WETH =
-        0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
+    address internal constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
 
-    address internal constant PERMIT2 =
-        0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    address internal constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     uint256 internal constant USDC_AMOUNT = 3_000_000;
     uint256 internal constant WETH_AMOUNT = 1_000_000_000_000_000;
@@ -45,14 +36,8 @@ contract ApproveSepoliaPoolTokens is Script {
         IERC20LimitedApproval usdc = IERC20LimitedApproval(USDC);
         IERC20LimitedApproval weth = IERC20LimitedApproval(WETH);
 
-        require(
-            usdc.balanceOf(owner) >= USDC_AMOUNT,
-            "Insufficient USDC balance"
-        );
-        require(
-            weth.balanceOf(owner) >= WETH_AMOUNT,
-            "Insufficient WETH balance"
-        );
+        require(usdc.balanceOf(owner) >= USDC_AMOUNT, "Insufficient USDC balance");
+        require(weth.balanceOf(owner) >= WETH_AMOUNT, "Insufficient WETH balance");
 
         uint256 usdcAllowance = usdc.allowance(owner, PERMIT2);
         uint256 wethAllowance = weth.allowance(owner, PERMIT2);

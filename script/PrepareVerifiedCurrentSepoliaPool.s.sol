@@ -45,13 +45,13 @@ contract PrepareVerifiedCurrentSepoliaPool is Script {
     address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address private constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address private constant PROTECTED_HOOK = 0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
+    address private constant PROTECTED_HOOK = 0x15D8C5eb1b839A4Fd86989348c1371c10168c080;
     address private constant POSITION_MANAGER = 0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4;
     address private constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     bytes32 private constant POSITION_MANAGER_CODE_HASH =
         0xcffd746f78c2b50aafd19076bbe9c48f14446e5248fc5d76b9b4896610e51aab;
     bytes32 private constant PERMIT2_CODE_HASH = 0x96d9f5c3f0fb0423426b7f970186235b7347027f4e5c19c40c412b7d97fc3751;
-    bytes32 private constant EXPECTED_POOL_ID = 0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    bytes32 private constant EXPECTED_POOL_ID = 0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235;
     uint24 private constant POOL_FEE = 3000;
     int24 private constant TICK_SPACING = 60;
     uint8 private constant MINT_POSITION = 0x02;

@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Deployers} from "../lib/v4-core/test/utils/Deployers.sol";
 import {PoolSwapTest} from "v4-core/test/PoolSwapTest.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {CustomRevert} from "v4-core/libraries/CustomRevert.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
@@ -67,7 +68,7 @@ contract MEVShieldIntegrationTest is Deployers {
          * PoolManager + Authorization addresses are embedded correctly.
          * ------------------------------------------------------------
          */
-        implementation = new MEVShieldHook(manager, authorization);
+        implementation = new MEVShieldHook(manager, authorization, address(mevShieldRouter));
 
         /*
          * ------------------------------------------------------------
@@ -128,11 +129,8 @@ contract MEVShieldIntegrationTest is Deployers {
     function _routerPolicy() internal view returns (MEVShieldHook.Policy memory policy) {
         policy = MEVShieldHook.Policy({
             poolId: PoolId.unwrap(key.toId()),
-            /*
-             * PoolManager.swap() is called by MEVShieldRouter,
-             * therefore MEVShieldHook sees MEVShieldRouter as sender.
-             */
-            trader: address(mevShieldRouter),
+            // The policy identifies the original wallet calling the router.
+            trader: address(this),
             nonce: 100,
             expiry: expiry,
             maxLoss: 100e6,
@@ -169,7 +167,13 @@ contract MEVShieldIntegrationTest is Deployers {
         MEVShieldHook.Policy memory policy = _policy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -180,20 +184,30 @@ contract MEVShieldIntegrationTest is Deployers {
         return abi.encode(policy, signature, policy.maxLoss, policy.maxFee);
     }
 
-    function test_Integration_RealPoolManagerReachesHook() public {
+    function _wrappedHookError(bytes4 innerError) internal view returns (bytes memory) {
+        return abi.encodeWithSelector(
+            CustomRevert.WrappedError.selector,
+            address(hook),
+            IHooks.beforeSwap.selector,
+            abi.encodeWithSelector(innerError),
+            abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+        );
+    }
+
+    function test_Integration_RealPoolManagerRejectsDirectExecution() public {
         MEVShieldHook.Policy memory policy = _policy();
 
         bytes memory signature = _signPolicy(policy);
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
-
-        /*
-         * PoolSwapTest's sender becomes the sender observed by
-         * PoolManager -> Hooks -> MEVShieldHook.
-         */
-        assertEq(policy.trader, address(swapRouter));
 
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
 
@@ -202,166 +216,203 @@ contract MEVShieldIntegrationTest is Deployers {
 
         bytes memory hookData = abi.encode(policy, signature, policy.maxLoss, policy.maxFee);
 
-        /*
-         * This is the real v4 execution path:
-         *
-         * test
-         *   ↓
-         * PoolSwapTest
-         *   ↓
-         * PoolManager.unlock()
-         *   ↓
-         * PoolManager.swap()
-         *   ↓
-         * Hooks.beforeSwap()
-         *   ↓
-         * MEVShieldHook.beforeSwap()
-         *   ↓
-         * PolicyAuthorization.authorize()
-         *   ↓
-         * PolicyVerifier.verifyPolicy()
-         *   ↓
-         * PolicyRegistry.consumePolicy()
-         */
+        vm.expectRevert(_wrappedHookError(MEVShieldHook.UnauthorizedRouter.selector));
+
         swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData);
 
-        /*
-         * Successful authorization must consume the nonce.
-         */
-        assertTrue(registry.isConsumed(policy.trader, policy.nonce));
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
     function test_Integration_ReplayedPolicyFails() public {
-        bytes memory hookData = _hookData();
+        MEVShieldHook.Policy memory policy = _routerPolicy();
 
-        IPoolManager.SwapParams memory params =
-            IPoolManager.SwapParams({zeroForOne: true, amountSpecified: -100e6, sqrtPriceLimitX96: MIN_PRICE_LIMIT});
+        registry.registerPolicy(
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
+        );
 
-        /*
-         * First execution succeeds and consumes the policy.
-         */
-        swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData);
+        bytes memory signature = _signPolicy(policy);
+        bytes memory hookData = abi.encode(policy, signature, policy.maxLoss, policy.maxFee);
 
-        assertTrue(registry.isConsumed(address(swapRouter), 1));
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
 
-        /*
-         * The same signed policy cannot be used again.
-         */
+        IERC20Minimal(Currency.unwrap(key.currency0)).approve(address(mevShieldRouter), type(uint256).max);
+
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce));
+
+        // First execution succeeds and consumes the policy.
+        mevShieldRouter.executeSwap(key, params, hookData, address(this));
+
+        assertTrue(registry.isConsumed(policy.trader, policy.nonce));
+
+        // The same signed policy cannot be used again.
         vm.expectRevert();
 
-        swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData);
+        mevShieldRouter.executeSwap(key, params, hookData, address(this));
     }
 
     function test_Integration_WrongPoolPolicyFails() public {
-        MEVShieldHook.Policy memory policy = _policy();
+        MEVShieldHook.Policy memory policy = _routerPolicy();
+        policy.poolId = keccak256("wrong-pool");
 
-        bytes32 wrongPool = keccak256("wrong-pool");
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
 
-        policy.poolId = wrongPool;
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
 
-        bytes memory signature = _signPolicy(policy);
-
-        /*
-         * No registry registration is needed because the hook should
-         * reject the pool mismatch before authorization.
-         */
-        bytes memory hookData = abi.encode(policy, signature, policy.maxLoss, policy.maxFee);
-
-        IPoolManager.SwapParams memory params =
-            IPoolManager.SwapParams({zeroForOne: true, amountSpecified: -100e6, sqrtPriceLimitX96: MIN_PRICE_LIMIT});
-
-        vm.expectRevert();
-
-        swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData);
+        vm.expectRevert(MEVShieldRouter.InvalidMinimumOutput.selector);
+        mevShieldRouter.executeSwap(key, params, hookData, address(this));
 
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
     function test_Integration_WrongSwapParametersFail() public {
-        MEVShieldHook.Policy memory policy = _policy();
+        MEVShieldHook.Policy memory policy = _routerPolicy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
-        bytes memory signature = _signPolicy(policy);
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
 
-        bytes memory hookData = abi.encode(policy, signature, policy.maxLoss, policy.maxFee);
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified - 100e6,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
 
-        /*
-         * Policy says -100e6.
-         * Actual swap attempts -200e6.
-         */
-        IPoolManager.SwapParams memory params =
-            IPoolManager.SwapParams({zeroForOne: true, amountSpecified: -200e6, sqrtPriceLimitX96: MIN_PRICE_LIMIT});
+        vm.expectRevert(MEVShieldRouter.InvalidMinimumOutput.selector);
+        mevShieldRouter.executeSwap(key, params, hookData, address(this));
 
-        vm.expectRevert();
-
-        swapRouter.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData);
-
-        /*
-         * Authorization must not consume the policy because the hook
-         * rejected the swap before authorization.
-         */
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
     function test_Integration_MaxLossExceededFailsWithoutConsumingPolicy() public {
-        MEVShieldHook.Policy memory policy = _policy();
+        MEVShieldHook.Policy memory policy = _routerPolicy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
-        bytes memory signature = _signPolicy(policy);
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss + 1, policy.maxFee);
 
-        uint256 actualLoss = policy.maxLoss + 1;
-        uint256 actualFee = policy.maxFee;
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
 
-        bytes memory hookData = abi.encode(policy, signature, actualLoss, actualFee);
+        IERC20Minimal(Currency.unwrap(key.currency0)).approve(address(mevShieldRouter), type(uint256).max);
 
-        vm.expectRevert();
-
-        swapRouter.swap(
-            key,
-            IPoolManager.SwapParams({
-                zeroForOne: policy.zeroForOne,
-                amountSpecified: policy.amountSpecified,
-                sqrtPriceLimitX96: policy.sqrtPriceLimitX96
-            }),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            hookData
-        );
+        vm.expectRevert(_wrappedHookError(MEVShieldHook.MaxLossExceeded.selector));
+        mevShieldRouter.executeSwap(key, params, hookData, address(this));
 
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
     function test_Integration_MaxFeeExceededFailsWithoutConsumingPolicy() public {
-        MEVShieldHook.Policy memory policy = _policy();
+        MEVShieldHook.Policy memory policy = _routerPolicy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
-        bytes memory signature = _signPolicy(policy);
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee + 1);
 
-        uint256 actualLoss = policy.maxLoss;
-        uint256 actualFee = policy.maxFee + 1;
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
 
-        bytes memory hookData = abi.encode(policy, signature, actualLoss, actualFee);
+        IERC20Minimal(Currency.unwrap(key.currency0)).approve(address(mevShieldRouter), type(uint256).max);
 
-        vm.expectRevert();
+        vm.expectRevert(_wrappedHookError(MEVShieldHook.MaxFeeExceeded.selector));
+        mevShieldRouter.executeSwap(key, params, hookData, address(this));
 
-        swapRouter.swap(
-            key,
-            IPoolManager.SwapParams({
-                zeroForOne: policy.zeroForOne,
-                amountSpecified: policy.amountSpecified,
-                sqrtPriceLimitX96: policy.sqrtPriceLimitX96
-            }),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            hookData
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce));
+    }
+
+    function test_Integration_WrongWalletCannotExecutePolicy() public {
+        MEVShieldHook.Policy memory policy = _routerPolicy();
+
+        registry.registerPolicy(
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
+
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
+
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
+
+        address attacker = makeAddr("attacker");
+
+        vm.prank(attacker);
+        vm.expectRevert(MEVShieldRouter.UnauthorizedTrader.selector);
+        mevShieldRouter.executeSwap(key, params, hookData, attacker);
+
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce));
+    }
+
+    function test_Integration_RecipientMustBeTheSignedTrader() public {
+        MEVShieldHook.Policy memory policy = _routerPolicy();
+        registry.registerPolicy(
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
+        );
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: policy.zeroForOne,
+            amountSpecified: policy.amountSpecified,
+            sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+        });
+
+        vm.expectRevert(MEVShieldRouter.InvalidRecipient.selector);
+        mevShieldRouter.executeSwap(key, params, hookData, makeAddr("different-recipient"));
 
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
@@ -370,7 +421,13 @@ contract MEVShieldIntegrationTest is Deployers {
         MEVShieldHook.Policy memory policy = _routerPolicy();
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -414,7 +471,13 @@ contract MEVShieldIntegrationTest is Deployers {
         MEVShieldHook.Policy memory policy = _routerPolicy();
         policy.minAmountOut = type(uint128).max;
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
         bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
         IERC20Minimal(Currency.unwrap(key.currency0)).approve(address(mevShieldRouter), type(uint256).max);
@@ -444,7 +507,13 @@ contract MEVShieldIntegrationTest is Deployers {
         policy.sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(500);
         policy.minAmountOut = 1;
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
         bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
         IERC20Minimal(Currency.unwrap(key.currency1)).approve(address(mevShieldRouter), type(uint256).max);
@@ -465,20 +534,22 @@ contract MEVShieldIntegrationTest is Deployers {
         assertTrue(registry.isConsumed(policy.trader, policy.nonce));
     }
 
-
     function test_RouterRejectsPriceLimitBeyondTickDistanceZeroForOne() public {
         MEVShieldHook.Policy memory policy = _routerPolicy();
         policy.nonce = 301;
         policy.sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(-601);
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry,
-            policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
-        bytes memory hookData = abi.encode(
-            policy, _signPolicy(policy), policy.maxLoss, policy.maxFee
-        );
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: policy.zeroForOne,
             amountSpecified: policy.amountSpecified,
@@ -499,13 +570,16 @@ contract MEVShieldIntegrationTest is Deployers {
         policy.sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(601);
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry,
-            policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
-        bytes memory hookData = abi.encode(
-            policy, _signPolicy(policy), policy.maxLoss, policy.maxFee
-        );
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: policy.zeroForOne,
             amountSpecified: policy.amountSpecified,
@@ -524,13 +598,16 @@ contract MEVShieldIntegrationTest is Deployers {
         policy.sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(0);
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry,
-            policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
-        bytes memory hookData = abi.encode(
-            policy, _signPolicy(policy), policy.maxLoss, policy.maxFee
-        );
+        bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: policy.zeroForOne,
             amountSpecified: policy.amountSpecified,
@@ -552,7 +629,7 @@ contract MEVShieldIntegrationTest is Deployers {
 
         MEVShieldHook.Policy memory policy = MEVShieldHook.Policy({
             poolId: PoolId.unwrap(nativeKey.toId()),
-            trader: address(mevShieldRouter),
+            trader: address(this),
             nonce: 200,
             expiry: expiry,
             maxLoss: 100e6,
@@ -564,7 +641,13 @@ contract MEVShieldIntegrationTest is Deployers {
         });
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory signature = _signPolicy(policy);
@@ -598,7 +681,7 @@ contract MEVShieldIntegrationTest is Deployers {
 
         MEVShieldHook.Policy memory policy = MEVShieldHook.Policy({
             poolId: PoolId.unwrap(nativeKey.toId()),
-            trader: address(mevShieldRouter),
+            trader: address(this),
             nonce: 201,
             expiry: expiry,
             maxLoss: 100e6,
@@ -610,7 +693,13 @@ contract MEVShieldIntegrationTest is Deployers {
         });
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);
@@ -637,7 +726,13 @@ contract MEVShieldIntegrationTest is Deployers {
         policy.nonce = 202;
 
         registry.registerPolicy(
-            policy.poolId, policy.trader, policy.nonce, policy.expiry, policy.maxLoss, policy.maxFee, policy.minAmountOut
+            policy.poolId,
+            policy.trader,
+            policy.nonce,
+            policy.expiry,
+            policy.maxLoss,
+            policy.maxFee,
+            policy.minAmountOut
         );
 
         bytes memory hookData = abi.encode(policy, _signPolicy(policy), policy.maxLoss, policy.maxFee);

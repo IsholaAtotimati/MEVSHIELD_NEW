@@ -31,6 +31,7 @@ export const PolicyRequestSchema = z
     zeroForOne: z.boolean(),
     sqrtPriceLimitX96: z.string().regex(unsignedDecimalPattern),
     minAmountOut: z.string().regex(nonZeroUintPattern),
+    quoteId: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   })
   .strict()
   .superRefine((data, ctx) => {

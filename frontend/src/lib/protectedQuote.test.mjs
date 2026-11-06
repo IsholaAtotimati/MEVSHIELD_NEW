@@ -7,6 +7,7 @@ import {
   calculatePoolId,
   calculateSwapReadiness,
   getZeroForOne,
+  hasSufficientQuoteWindow,
   isFreshDemoPoolReadiness,
   isFreshQuote,
   loadProtectedPoolQuote,
@@ -18,10 +19,30 @@ import {
 const WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14";
 const USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const MANAGER = "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543";
-const HOOK = "0xd15e4fdd391a68c2f1c385d1a819117a3ad40080";
-const AUTHORIZATION = "0xefC9bc21f1ab3564232a3216f0e45d5caE3Bd7c5";
+const HOOK = "0x15D8C5eb1b839A4Fd86989348c1371c10168c080";
+const AUTHORIZATION = "0xEDC98B44349EDF0D0b71cBc5D4523352ffB8c821";
 const OTHER = "0x0000000000000000000000000000000000000001";
 const now = 100_000;
+const quotePoolId =
+  "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235";
+
+function availableQuote(quotedAtMs = now) {
+  return {
+    status: "available",
+    poolId: quotePoolId,
+    amountInBaseUnits: 1n,
+    amountOutBaseUnits: 1n,
+    minAmountOutBaseUnits: 1n,
+    zeroForOne: true,
+    priceImpactBps: 0,
+    sqrtPriceLimitX96: "1",
+    quoteId: `0x${"11".repeat(32)}`,
+    blockNumber: 1,
+    blockTimestamp: 100,
+    expiresAtMs: quotedAtMs + 15_000,
+    quotedAtMs,
+  };
+}
 
 test("calculates positive minimum output in exact base units with bounded slippage", () => {
   assert.equal(calculateMinimumOutput(1_000_000n, 50), 995_000n);
@@ -206,14 +227,31 @@ test("a missing quote keeps both risk and execution disabled", () => {
 });
 
 test("rejects stale available quote data", () => {
-  const quote = {
-    status: "available",
-    poolId,
-    amountInBaseUnits: 1n,
-    amountOutBaseUnits: 1n,
-    quotedAtMs: now - 15_001,
-  };
+  const quote = availableQuote(now - 15_001);
   assert.equal(isFreshQuote(quote, now), false);
+});
+
+test("live quote freshness requires matching direction and an unexpired quote", () => {
+  const quote = availableQuote();
+  assert.equal(isFreshQuote(quote, now, 1n, quotePoolId, true), true);
+  assert.equal(isFreshQuote(quote, now, 1n, quotePoolId, false), false);
+  assert.equal(
+    isFreshQuote({ ...quote, expiresAtMs: now - 1 }, now, 1n, quotePoolId, true),
+    false,
+  );
+});
+
+test("execution requires a minimum remaining quote window", () => {
+  const quote = availableQuote(now);
+  assert.equal(hasSufficientQuoteWindow(quote, now, 10_000), true);
+  assert.equal(
+    hasSufficientQuoteWindow(
+      { ...quote, expiresAtMs: now + 9_999 },
+      now,
+      10_000,
+    ),
+    false,
+  );
 });
 
 test("demo mode requires a recent initialized and liquid pool inspection", () => {
@@ -240,13 +278,7 @@ test("demo mode requires a recent initialized and liquid pool inspection", () =>
 test("does not enable risk checking until backend pool key is verified", () => {
   const readiness = calculateSwapReadiness({
     amountInBaseUnits: 1n,
-    quote: {
-      status: "available",
-      poolId,
-      amountInBaseUnits: 1n,
-      amountOutBaseUnits: 1n,
-      quotedAtMs: now,
-    },
+    quote: availableQuote(),
     nowMs: now,
     poolId,
     poolKeyMatches: true,
@@ -263,13 +295,7 @@ test("does not enable risk checking until backend pool key is verified", () => {
 test("keeps risk and execution disabled until v2 minimum-output contracts are verified", () => {
   const readiness = calculateSwapReadiness({
     amountInBaseUnits: 1n,
-    quote: {
-      status: "available",
-      poolId,
-      amountInBaseUnits: 1n,
-      amountOutBaseUnits: 1n,
-      quotedAtMs: now,
-    },
+    quote: availableQuote(),
     nowMs: now,
     poolId,
     poolKeyMatches: true,
@@ -284,7 +310,7 @@ test("keeps risk and execution disabled until v2 minimum-output contracts are ve
   assert.match(readiness.reasons.join(" "), /minimum-output v2 contracts/);
 });
 
-test("demo mode can proceed without a market quote or deployment flag when its estimate is fresh", () => {
+test("demo estimates allow risk checks but never protected execution", () => {
   const readiness = calculateSwapReadiness({
     amountInBaseUnits: 1n,
     quote: { status: "unavailable", reason: "quote-simulation-unavailable" },
@@ -303,6 +329,7 @@ test("demo mode can proceed without a market quote or deployment flag when its e
   assert.equal(readiness.canExecute, false);
   assert.equal(readiness.reasons.some((reason) => /minimum-output v2/.test(reason)), false);
   assert.deepEqual(readiness.executionReasons, [
+    "Demo mode cannot execute protected swaps.",
     "Registered policy bounds are not verified.",
   ]);
   const registeredReadiness = calculateSwapReadiness({
@@ -319,8 +346,11 @@ test("demo mode can proceed without a market quote or deployment flag when its e
     authorizationVerified: true,
     policyBoundsVerified: true,
   });
-  assert.equal(registeredReadiness.canExecute, true);
-  assert.deepEqual(registeredReadiness.executionReasons, []);
+  assert.equal(registeredReadiness.canExecute, false);
+  assert.match(
+    registeredReadiness.executionReasons.join(" "),
+    /Demo mode cannot execute/,
+  );
 
   const readOnlyDemo = calculateSwapReadiness({
     amountInBaseUnits: 1n,
@@ -356,6 +386,34 @@ test("demo mode can proceed without a market quote or deployment flag when its e
   });
   assert.equal(missingDemoEstimate.canCheckRisk, false);
   assert.equal(missingDemoEstimate.canExecute, false);
+});
+
+test("demo mode explains and blocks signing when the protected pool has no active liquidity", () => {
+  const readiness = calculateSwapReadiness({
+    amountInBaseUnits: 1n,
+    quote: {
+      status: "unavailable",
+      reason: "zero-active-liquidity",
+      observedAtMs: now,
+    },
+    nowMs: now,
+    demoMode: true,
+    demoEstimateAvailable: false,
+    poolId,
+    poolKeyMatches: true,
+    backendPoolKeyVerified: true,
+    protocolAddressesVerified: true,
+    minimumOutputProtocolVerified: false,
+    authorizationVerified: true,
+    policyBoundsVerified: true,
+  });
+
+  assert.equal(readiness.canCheckRisk, false);
+  assert.equal(readiness.canExecute, false);
+  assert.match(
+    readiness.reasons.join(" "),
+    /protected pool has no active liquidity.*Add liquidity before signing or swapping/,
+  );
 });
 
 test("frontend verifies every backend pool-key field, chain, and pool ID", () => {

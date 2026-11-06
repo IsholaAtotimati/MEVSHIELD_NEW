@@ -13,6 +13,8 @@ import type { DeploymentStatus } from "../lib/types";
 
 const EMPTY_DEPLOYMENT: DeploymentStatus = {
   poolManager: null,
+  routerPoolManager: null,
+  routerHasCode: false,
   authorization: null,
   registry: null,
   registryOwner: null,
@@ -20,6 +22,16 @@ const EMPTY_DEPLOYMENT: DeploymentStatus = {
   verifier: null,
   authorizedSigner: null,
 };
+
+const routerPoolManagerAbi = [
+  {
+    type: "function",
+    name: "poolManager",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
 
 export function useProtocol() {
   const [deployment, setDeployment] =
@@ -32,6 +44,8 @@ export function useProtocol() {
     try {
       const [
         poolManager,
+        routerPoolManager,
+        routerCode,
         authorization,
         registry,
         registryOwner,
@@ -44,6 +58,12 @@ export function useProtocol() {
           abi: mevShieldHookAbi,
           functionName: "poolManager",
         }),
+        publicClient.readContract({
+          address: CONTRACTS.mevShieldRouter,
+          abi: routerPoolManagerAbi,
+          functionName: "poolManager",
+        }),
+        publicClient.getCode({ address: CONTRACTS.mevShieldRouter }),
         publicClient.readContract({
           address: CONTRACTS.mevShieldHook,
           abi: mevShieldHookAbi,
@@ -78,6 +98,8 @@ export function useProtocol() {
 
       setDeployment({
         poolManager,
+        routerPoolManager,
+        routerHasCode: Boolean(routerCode && routerCode !== "0x"),
         authorization,
         registry,
         registryOwner,
@@ -96,6 +118,8 @@ export function useProtocol() {
 
   useEffect(() => {
     void loadProtocol();
+    const interval = window.setInterval(() => void loadProtocol(), 15_000);
+    return () => window.clearInterval(interval);
   }, [loadProtocol]);
 
   const hasAuthorization = Boolean(
@@ -106,6 +130,9 @@ export function useProtocol() {
 
   const protocolAddressesVerified = Boolean(
     deployment.poolManager?.toLowerCase() ===
+      CONTRACTS.poolManager.toLowerCase() &&
+    deployment.routerHasCode &&
+    deployment.routerPoolManager?.toLowerCase() ===
       CONTRACTS.poolManager.toLowerCase() &&
       deployment.authorization?.toLowerCase() ===
         CONTRACTS.poolAuthorization.toLowerCase() &&

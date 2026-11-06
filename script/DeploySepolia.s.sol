@@ -14,14 +14,12 @@ import {MEVShieldHook} from "../src/MEVShieldHook.sol";
 import {MEVShieldRouter} from "../src/MEVShieldRouter.sol";
 
 contract DeploySepolia is Script {
-    // DEPLOYER_PRIVATE_KEY and SIGNER_PRIVATE_KEY must be provided through the environment.
+    // SIGNER_PRIVATE_KEY defaults to DEPLOYER_PRIVATE_KEY when not provided.
     uint256 internal constant SEPOLIA_CHAIN_ID = 11155111;
-    address internal constant EXPECTED_AUTHORIZED_SIGNER =
-        0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
-    address internal constant POOL_MANAGER =
-        0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address internal constant CREATE2_DEPLOYER =
-        0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    address internal constant EXPECTED_DEPLOYER = 0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
+    address internal constant EXPECTED_AUTHORIZED_SIGNER = 0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
+    address internal constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     struct DeploymentInfo {
         address manager;
@@ -39,11 +37,12 @@ contract DeploySepolia is Script {
         require(block.chainid == SEPOLIA_CHAIN_ID, "Wrong chain: expected Sepolia");
 
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        uint256 signerKey = vm.envUint("SIGNER_PRIVATE_KEY");
+        uint256 signerKey = vm.envOr("SIGNER_PRIVATE_KEY", deployerKey);
 
         address deployer = vm.addr(deployerKey);
         address signer = vm.addr(signerKey);
 
+        require(deployer == EXPECTED_DEPLOYER, "Unexpected deployer");
         require(signer == EXPECTED_AUTHORIZED_SIGNER, "Unexpected authorized signer");
         require(POOL_MANAGER.code.length > 0, "Sepolia PoolManager is not deployed");
         require(CREATE2_DEPLOYER.code.length > 0, "CREATE2 deployer is not deployed");
@@ -68,10 +67,11 @@ contract DeploySepolia is Script {
         PolicyRegistry(info.registry).setAuthorizedRegistrar(info.authorization);
         PolicyRegistry(info.registry).setAuthorizedConsumer(info.authorization);
 
-        (info.hook, info.salt) = _deployHook(info.manager, info.authorization);
-        PolicyAuthorization(info.authorization).setAuthorizedHook(info.hook);
-
+        // Deploy the router first because the hook trusts this address immutably.
         info.router = address(new MEVShieldRouter(IPoolManager(info.manager)));
+
+        (info.hook, info.salt) = _deployHook(info.manager, info.authorization, info.router);
+        PolicyAuthorization(info.authorization).setAuthorizedHook(info.hook);
 
         vm.stopBroadcast();
 
@@ -80,8 +80,11 @@ contract DeploySepolia is Script {
         _logDeployment(info);
     }
 
-    function _deployHook(address manager, address authorization) internal returns (address hook, bytes32 salt) {
-        bytes memory constructorArgs = abi.encode(IPoolManager(manager), PolicyAuthorization(authorization));
+    function _deployHook(address manager, address authorization, address router)
+        internal
+        returns (address hook, bytes32 salt)
+    {
+        bytes memory constructorArgs = abi.encode(IPoolManager(manager), PolicyAuthorization(authorization), router);
 
         bytes memory initCode = abi.encodePacked(type(MEVShieldHook).creationCode, constructorArgs);
 

@@ -17,13 +17,14 @@ import {
 } from "../config/swapPool";
 import { parsePolicyResponseBody, parseRiskPreviewBody, apiErrorMessage } from "../lib/apiValidation";
 import { CONTRACTS } from "../lib/contracts";
-import { policyAuthorizationAbi, policyRegistryAbi } from "../lib/abis";
+import { erc20Abi, policyAuthorizationAbi, policyRegistryAbi } from "../lib/abis";
 import { shortAddress } from "../lib/format";
 import {
   calculateMinimumOutput,
   calculatePoolId,
   calculateSwapReadiness,
   DEMO_MIN_AMOUNT_OUT,
+  hasSufficientQuoteWindow,
   isFreshDemoPoolReadiness,
   type ProtectedQuote,
   type ProtectedPoolSnapshot,
@@ -33,6 +34,7 @@ import { readRegisteredPolicy } from "../lib/policyReads";
 import { policyResponseMatchesExpected } from "../lib/policyMatch";
 import { appendActivity } from "../lib/activityStorage";
 import { reportTransactionEvent } from "../lib/telemetry";
+import { authenticateWallet } from "../lib/auth";
 import type { PolicyResponse, RiskPreviewResult } from "../lib/types";
 import { getWalletClient, publicClient } from "../lib/viem";
 
@@ -50,6 +52,11 @@ type UsePolicyArgs = {
   quoteIsFresh: boolean;
   demoEstimateReady: boolean;
   quoteClockMs: number;
+  refreshLiveQuote: (
+    amountInBaseUnits: bigint,
+    zeroForOne: boolean,
+    slippageBps: number,
+  ) => Promise<ProtectedQuote | null>;
   backendPoolKeyVerified: boolean;
   protocolAddressesVerified: boolean;
   authorizationVerified: boolean;
@@ -194,6 +201,7 @@ export function usePolicy(args: UsePolicyArgs) {
       setAccount,
       ensureSepolia,
       quoteClockMs,
+      refreshLiveQuote,
       backendPoolKeyVerified,
       protocolAddressesVerified,
       authorizationVerified,
@@ -240,15 +248,20 @@ export function usePolicy(args: UsePolicyArgs) {
     // Narrowed once, after the guards above.
     const { poolId, poolKey } = SWAP_POOL_CONFIGURATION;
 
-    const limitTick = poolSnapshot.currentTick + (zeroForOne ? -599 : 599);
-    if (limitTick < -887272 || limitTick > 887272) {
-      setActionStatus("The calculated price limit is outside the supported tick range.");
-      return;
+    let sqrtPriceLimitX96 =
+      !SEPOLIA_DEMO_MODE && protectedQuote.status === "available"
+        ? protectedQuote.sqrtPriceLimitX96
+        : "";
+    if (SEPOLIA_DEMO_MODE) {
+      const limitTick = poolSnapshot.currentTick + (zeroForOne ? -599 : 599);
+      if (limitTick < -887272 || limitTick > 887272) {
+        setActionStatus("The calculated price limit is outside the supported tick range.");
+        return;
+      }
+      sqrtPriceLimitX96 = BigInt(
+        TickMath.getSqrtRatioAtTick(limitTick).toString(),
+      ).toString();
     }
-
-    const sqrtPriceLimitX96 = BigInt(
-      TickMath.getSqrtRatioAtTick(limitTick).toString(),
-    ).toString();
 
     setIsCreatingPolicy(true);
     clearPolicyState();
@@ -260,7 +273,7 @@ export function usePolicy(args: UsePolicyArgs) {
 
     logFrontend("swap_started", {
       requestId,
-      trader: CONTRACTS.mevShieldRouter,
+      trader: args.account,
       amount: amountSpecified?.toString(),
     });
     setActionStatus(
@@ -270,6 +283,7 @@ export function usePolicy(args: UsePolicyArgs) {
     );
 
     let registrationTxHash: Hex | undefined;
+    let signingQuote = protectedQuote;
     try {
       if (
         amountBaseUnits === null ||
@@ -297,13 +311,18 @@ export function usePolicy(args: UsePolicyArgs) {
           "A fresh initialized and liquid protected-pool check and a valid demo estimate are required.",
         );
       }
-      const minAmountOut = SEPOLIA_DEMO_MODE
-        ? DEMO_MIN_AMOUNT_OUT
-        : protectedQuote.status === "available"
+      const calculatedMinimum =
+        protectedQuote.status === "available"
           ? calculateMinimumOutput(
               protectedQuote.amountOutBaseUnits,
               slippageBps,
             )
+          : null;
+      let minAmountOut = SEPOLIA_DEMO_MODE
+        ? DEMO_MIN_AMOUNT_OUT
+        : protectedQuote.status === "available" &&
+            calculatedMinimum === protectedQuote.minAmountOutBaseUnits
+          ? protectedQuote.minAmountOutBaseUnits
           : null;
       if (minAmountOut === null) {
         throw new Error(
@@ -335,24 +354,127 @@ export function usePolicy(args: UsePolicyArgs) {
 
       await ensureSepolia();
 
+      if (
+        !SEPOLIA_DEMO_MODE &&
+        !hasSufficientQuoteWindow(
+          protectedQuote,
+          Date.now(),
+          undefined,
+          amountBaseUnits,
+          poolId,
+          zeroForOne,
+        )
+      ) {
+        throw new Error(
+          "The live quote does not have enough validity remaining. Refresh the quote before approving or signing.",
+        );
+      }
+
+      const inputTokenAddress = SWAP_TOKENS[inputToken].address;
+      if (inputTokenAddress === null) {
+        throw new Error("The selected input token is not configured for this pool.");
+      }
+      const inputBalance = await publicClient.readContract({
+        address: inputTokenAddress,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [connectedAccount],
+      });
+      if (inputBalance < amountBaseUnits) {
+        throw new Error(
+          "Insufficient input-token balance before policy creation.",
+        );
+      }
+      const allowance = await publicClient.readContract({
+        address: inputTokenAddress,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [connectedAccount, CONTRACTS.mevShieldRouter],
+      });
+      if (allowance < amountBaseUnits) {
+        setActionStatus(
+          "Approve the input token before policy signing; you pay the approval gas.",
+        );
+        const approvalHash = await walletClient.writeContract({
+          address: inputTokenAddress,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [CONTRACTS.mevShieldRouter, amountBaseUnits],
+          account: connectedAccount,
+        });
+        const approvalReceipt = await publicClient.waitForTransactionReceipt({
+          hash: approvalHash,
+        });
+        if (approvalReceipt.status !== "success") {
+          throw new Error("Input-token approval transaction failed.");
+        }
+      }
+      if (!SEPOLIA_DEMO_MODE) {
+        const refreshedQuote = await refreshLiveQuote(
+          amountBaseUnits,
+          zeroForOne,
+          slippageBps,
+        );
+        if (!refreshedQuote || refreshedQuote.status !== "available") {
+          throw new Error(
+            "A new protected quote could not be obtained after approval. Refresh the quote before creating a policy.",
+          );
+        }
+        signingQuote = refreshedQuote;
+        sqrtPriceLimitX96 = refreshedQuote.sqrtPriceLimitX96;
+        const refreshedMinimum = calculateMinimumOutput(
+          refreshedQuote.amountOutBaseUnits,
+          slippageBps,
+        );
+        if (
+          refreshedMinimum === null ||
+          refreshedMinimum !== refreshedQuote.minAmountOutBaseUnits
+        ) {
+          throw new Error(
+            "The refreshed quote minimum output does not match the selected slippage.",
+          );
+        }
+        minAmountOut = refreshedQuote.minAmountOutBaseUnits;
+      }
+      if (
+        !SEPOLIA_DEMO_MODE &&
+        !hasSufficientQuoteWindow(
+          signingQuote,
+          Date.now(),
+          undefined,
+          amountBaseUnits,
+          poolId,
+          zeroForOne,
+        )
+      ) {
+        throw new Error(
+          "The quote expired or no longer has enough validity after approval. Refresh the quote before creating a policy.",
+        );
+      }
+
       const expiry = buildPolicyExpiry(Date.now() / 1000);
       const nonce = Date.now().toString();
+      const authToken = await authenticateWallet(walletClient, connectedAccount);
 
       const response = await fetch(`${BACKEND_URL}/policy`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-request-id": requestId,
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           poolId: poolId,
-          trader: CONTRACTS.mevShieldRouter,
+          trader: connectedAccount,
           nonce,
           expiry: expiry.toString(),
           amountSpecified: amountSpecified.toString(),
           zeroForOne,
           sqrtPriceLimitX96,
           minAmountOut: minAmountOut.toString(),
+          ...(!SEPOLIA_DEMO_MODE && signingQuote.status === "available"
+            ? { quoteId: signingQuote.quoteId }
+            : {}),
         }),
       });
 
@@ -382,7 +504,7 @@ export function usePolicy(args: UsePolicyArgs) {
 
       const expected = {
         poolId: poolId,
-        trader: CONTRACTS.mevShieldRouter,
+        trader: connectedAccount,
         nonce,
         expiry: expiry.toString(),
         amountSpecified: amountSpecified.toString(),
@@ -397,6 +519,21 @@ export function usePolicy(args: UsePolicyArgs) {
 
       if (responseRequestId !== requestId) {
         throw new Error("Backend request ID did not match this swap.");
+      }
+      if (
+        !SEPOLIA_DEMO_MODE &&
+        !hasSufficientQuoteWindow(
+          signingQuote,
+          Date.now(),
+          undefined,
+          amountBaseUnits,
+          poolId,
+          zeroForOne,
+        )
+      ) {
+        throw new Error(
+          "The live quote no longer has enough validity for policy registration. Refresh the quote and create a new policy.",
+        );
       }
       result.requestId = requestId;
 

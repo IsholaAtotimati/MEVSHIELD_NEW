@@ -45,15 +45,15 @@ contract PrepareSepoliaPool is Script {
     address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address private constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address private constant PROTECTED_HOOK = 0xd8aE178f4C5a17daF7f32b3648e0Ac42f50DC080;
     address private constant POSITION_MANAGER = 0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4;
     address private constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     bytes32 private constant POSITION_MANAGER_CODE_HASH =
         0xcffd746f78c2b50aafd19076bbe9c48f14446e5248fc5d76b9b4896610e51aab;
     bytes32 private constant PERMIT2_CODE_HASH = 0x96d9f5c3f0fb0423426b7f970186235b7347027f4e5c19c40c412b7d97fc3751;
-    bytes32 private constant EXPECTED_POOL_ID = 0x37d213cbaee2010a7fa4c5fd122001a301ea0364bf63bfee0116913f14477c78;
     uint24 private constant POOL_FEE = 3000;
     int24 private constant TICK_SPACING = 60;
+    uint160 private constant HOOK_PERMISSION_MASK = (1 << 14) - 1;
+    uint160 private constant REQUIRED_HOOK_PERMISSIONS = 1 << 7;
     uint8 private constant MINT_POSITION = 0x02;
     uint8 private constant SETTLE_PAIR = 0x0d;
 
@@ -62,14 +62,16 @@ contract PrepareSepoliaPool is Script {
     function run() external view {
         require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain: expected Sepolia");
         require(address(manager).code.length != 0, "PoolManager has no code");
-        require(PROTECTED_HOOK.code.length != 0, "protected hook has no code");
-        require(
-            address(IProtectedHookPoolSetup(PROTECTED_HOOK).poolManager()) == POOL_MANAGER, "hook PoolManager mismatch"
-        );
+        address hook = vm.envAddress("HOOK_ADDRESS");
+        bytes32 expectedPoolId = vm.envBytes32("EXPECTED_POOL_ID");
+        require(hook.code.length != 0, "protected hook has no code");
+        require(expectedPoolId != bytes32(0), "EXPECTED_POOL_ID is required");
+        require((uint160(hook) & HOOK_PERMISSION_MASK) == REQUIRED_HOOK_PERMISSIONS, "hook permission bits mismatch");
+        require(address(IProtectedHookPoolSetup(hook).poolManager()) == POOL_MANAGER, "hook PoolManager mismatch");
 
-        PoolKey memory key = _poolKey();
+        PoolKey memory key = _poolKey(hook);
         PoolId poolId = key.toId();
-        require(PoolId.unwrap(poolId) == EXPECTED_POOL_ID, "candidate pool ID mismatch");
+        require(PoolId.unwrap(poolId) == expectedPoolId, "candidate pool ID mismatch");
 
         string memory stage = vm.envString("POOL_SETUP_STAGE");
         uint256 sqrtPriceValue = vm.envUint("POOL_INITIAL_SQRT_PRICE_X96");
@@ -89,13 +91,48 @@ contract PrepareSepoliaPool is Script {
         _printLiquidityPlan(key, poolId, initialSqrtPriceX96);
     }
 
-    function _poolKey() private pure returns (PoolKey memory) {
+    function executeLiquidity() external {
+        require(vm.envBool("POOL_SETUP_EXECUTE"), "liquidity execution must be explicitly enabled");
+        require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain: expected Sepolia");
+        require(address(manager).code.length != 0, "PoolManager has no code");
+
+        address hook = vm.envAddress("HOOK_ADDRESS");
+        bytes32 expectedPoolId = vm.envBytes32("EXPECTED_POOL_ID");
+        require(hook.code.length != 0, "protected hook has no code");
+        require(expectedPoolId != bytes32(0), "EXPECTED_POOL_ID is required");
+        require((uint160(hook) & HOOK_PERMISSION_MASK) == REQUIRED_HOOK_PERMISSIONS, "hook permission bits mismatch");
+        require(address(IProtectedHookPoolSetup(hook).poolManager()) == POOL_MANAGER, "hook PoolManager mismatch");
+
+        PoolKey memory key = _poolKey(hook);
+        PoolId poolId = key.toId();
+        require(PoolId.unwrap(poolId) == expectedPoolId, "candidate pool ID mismatch");
+
+        uint256 sqrtPriceValue = vm.envUint("POOL_INITIAL_SQRT_PRICE_X96");
+        require(sqrtPriceValue <= type(uint160).max, "initial sqrt price exceeds uint160");
+        uint160 initialSqrtPriceX96 = uint160(sqrtPriceValue);
+        require(
+            initialSqrtPriceX96 > TickMath.MIN_SQRT_PRICE && initialSqrtPriceX96 < TickMath.MAX_SQRT_PRICE,
+            "initial sqrt price outside TickMath bounds"
+        );
+        require(keccak256(bytes(vm.envString("POOL_SETUP_STAGE"))) == keccak256("liquidity"), "stage must be liquidity");
+
+        bytes[] memory calls = _printLiquidityPlan(key, poolId, initialSqrtPriceX96);
+        uint256 privateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address owner = vm.envAddress("POOL_LP_OWNER");
+        require(vm.addr(privateKey) == owner, "liquidity signer must be the LP owner");
+
+        vm.startBroadcast(privateKey);
+        IMulticallPoolSetup(POSITION_MANAGER).multicall(calls);
+        vm.stopBroadcast();
+    }
+
+    function _poolKey(address hook) private pure returns (PoolKey memory) {
         return PoolKey({
             currency0: Currency.wrap(USDC),
             currency1: Currency.wrap(WETH),
             fee: POOL_FEE,
             tickSpacing: TICK_SPACING,
-            hooks: IHooks(PROTECTED_HOOK)
+            hooks: IHooks(hook)
         });
     }
 
@@ -118,7 +155,11 @@ contract PrepareSepoliaPool is Script {
         console2.logBytes(callData);
     }
 
-    function _printLiquidityPlan(PoolKey memory key, PoolId poolId, uint160 expectedSqrtPriceX96) private view {
+    function _printLiquidityPlan(PoolKey memory key, PoolId poolId, uint160 expectedSqrtPriceX96)
+        private
+        view
+        returns (bytes[] memory calls)
+    {
         (uint160 currentSqrtPriceX96, int24 currentTick,,) = manager.getSlot0(poolId);
         require(currentSqrtPriceX96 == expectedSqrtPriceX96, "pool price differs from requested initial price");
         require(manager.getLiquidity(poolId) == 0, "pool already has active liquidity; inspect before proceeding");
@@ -179,11 +220,11 @@ contract PrepareSepoliaPool is Script {
         actionParams[0] = abi.encode(key, tickLower, tickUpper, liquidity, amount0Max, amount1Max, recipient, bytes(""));
         actionParams[1] = abi.encode(key.currency0, key.currency1);
         bytes memory unlockData = abi.encode(actions, actionParams);
-        bytes[] memory calls = new bytes[](1);
+        calls = new bytes[](1);
         calls[0] = abi.encodeCall(IPositionManagerPoolSetup.modifyLiquidities, (unlockData, deadline));
         bytes memory callData = abi.encodeCall(IMulticallPoolSetup.multicall, (calls));
 
-        console2.log("Read-only plan; no transaction sent.");
+        console2.log("Validated liquidity plan.");
         console2.log("Stage: add first liquidity position");
         console2.log("Observed block:", block.number);
         console2.log("Pool ID:");

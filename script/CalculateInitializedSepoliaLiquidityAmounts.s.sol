@@ -11,46 +11,52 @@ import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {SqrtPriceMath} from "v4-core/libraries/SqrtPriceMath.sol";
 
+interface IInitializedPoolHook {
+    function poolManager() external view returns (IPoolManager);
+}
+
 contract CalculateInitializedSepoliaLiquidityAmounts is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
     uint256 constant SEPOLIA_CHAIN_ID = 11155111;
     address constant MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address constant HOOK = 0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
     address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
     uint24 constant FEE = 3000;
     int24 constant SPACING = 60;
-    bytes32 constant EXPECTED_POOL_ID =
-        0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    uint160 constant HOOK_PERMISSION_MASK = (1 << 14) - 1;
+    uint160 constant REQUIRED_HOOK_PERMISSIONS = 1 << 7;
 
     function run() external view {
         require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain");
-        require(MANAGER.code.length != 0 && HOOK.code.length != 0, "missing contract code");
+        address hook = vm.envAddress("HOOK_ADDRESS");
+        bytes32 expectedPoolId = vm.envBytes32("EXPECTED_POOL_ID");
+        require(MANAGER.code.length != 0 && hook.code.length != 0, "missing contract code");
+        require(expectedPoolId != bytes32(0), "EXPECTED_POOL_ID is required");
+        require((uint160(hook) & HOOK_PERMISSION_MASK) == REQUIRED_HOOK_PERMISSIONS, "hook permission bits mismatch");
+        require(address(IInitializedPoolHook(hook).poolManager()) == MANAGER, "hook PoolManager mismatch");
 
         PoolKey memory key = PoolKey({
             currency0: Currency.wrap(USDC),
             currency1: Currency.wrap(WETH),
             fee: FEE,
             tickSpacing: SPACING,
-            hooks: IHooks(HOOK)
+            hooks: IHooks(hook)
         });
 
         PoolId poolId = key.toId();
-        require(PoolId.unwrap(poolId) == EXPECTED_POOL_ID, "pool ID mismatch");
+        require(PoolId.unwrap(poolId) == expectedPoolId, "pool ID mismatch");
 
         IPoolManager manager = IPoolManager(MANAGER);
         (uint160 livePrice,,,) = manager.getSlot0(poolId);
 
-        uint256 requestedPrice =
-            vm.envUint("POOL_INITIAL_SQRT_PRICE_X96");
+        uint256 requestedPrice = vm.envUint("POOL_INITIAL_SQRT_PRICE_X96");
         require(requestedPrice <= type(uint160).max, "price exceeds uint160");
         uint160 sqrtPriceX96 = uint160(requestedPrice);
         require(livePrice == sqrtPriceX96, "live pool price differs from expected");
         require(
-            sqrtPriceX96 > TickMath.MIN_SQRT_PRICE &&
-            sqrtPriceX96 < TickMath.MAX_SQRT_PRICE,
+            sqrtPriceX96 > TickMath.MIN_SQRT_PRICE && sqrtPriceX96 < TickMath.MAX_SQRT_PRICE,
             "price outside TickMath bounds"
         );
 
@@ -64,22 +70,14 @@ contract CalculateInitializedSepoliaLiquidityAmounts is Script {
         require(lower < upper, "invalid tick range");
         require(lower % SPACING == 0 && upper % SPACING == 0, "ticks not aligned");
         require(lower <= initialTick && initialTick < upper, "price outside range");
-        require(
-            liquidityValue > 0 &&
-            liquidityValue <= uint256(uint128(type(int128).max)),
-            "invalid liquidity"
-        );
+        require(liquidityValue > 0 && liquidityValue <= uint256(uint128(type(int128).max)), "invalid liquidity");
 
         int128 liquidity = int128(uint128(liquidityValue));
         uint160 sqrtLower = TickMath.getSqrtPriceAtTick(lower);
         uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(upper);
 
-        int256 delta0 = SqrtPriceMath.getAmount0Delta(
-            sqrtPriceX96, sqrtUpper, liquidity
-        );
-        int256 delta1 = SqrtPriceMath.getAmount1Delta(
-            sqrtLower, sqrtPriceX96, liquidity
-        );
+        int256 delta0 = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtUpper, liquidity);
+        int256 delta1 = SqrtPriceMath.getAmount1Delta(sqrtLower, sqrtPriceX96, liquidity);
 
         require(delta0 <= 0 && delta1 <= 0, "unexpected delta signs");
 

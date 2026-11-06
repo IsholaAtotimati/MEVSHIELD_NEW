@@ -11,6 +11,7 @@
  */
 import type {
   BackendHealth,
+  LiveProtectedQuoteResponse,
   PolicyResponse,
   RiskPreviewResult,
   SepoliaMonitorStatus,
@@ -155,6 +156,7 @@ export function parsePolicyResponseBody(body: unknown): PolicyResponse | null {
   for (const key of stringFields) {
     if (typeof p[key] !== "string") return null;
   }
+
   if (typeof p.zeroForOne !== "boolean") return null;
   for (const key of ["estimatedLoss", "estimatedFee", "signature", "policyId"] as const) {
     if (typeof record[key] !== "string") return null;
@@ -188,5 +190,98 @@ export function parsePolicyResponseBody(body: unknown): PolicyResponse | null {
     requestId:
       typeof record.requestId === "string" ? record.requestId : "",
     demoMode: record.demoMode === true,
+  };
+}
+
+export function parseLiveProtectedQuoteBody(
+  body: unknown,
+): LiveProtectedQuoteResponse | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  const poolState = record.poolState;
+  if (!poolState || typeof poolState !== "object") return null;
+  const state = poolState as Record<string, unknown>;
+  const poolId = record.poolId;
+  const amountSpecified = record.amountSpecified;
+  const amountOut = record.amountOut;
+  const minAmountOut = record.minAmountOut;
+  const sqrtPriceLimitX96 = record.sqrtPriceLimitX96;
+  const quotedAt = record.quotedAt;
+  const expiresAt = record.expiresAt;
+  const quoteId = record.quoteId;
+  const chainId = record.chainId;
+  const zeroForOne = record.zeroForOne;
+  const priceImpactBps = record.priceImpactBps;
+  const feePips = record.feePips;
+  const blockNumber = record.blockNumber;
+  const blockTimestamp = record.blockTimestamp;
+  const sqrtPrice = state.sqrtPriceX96;
+  const tick = state.tick;
+  const liquidity = state.liquidity;
+  if (
+    typeof poolId !== "string" ||
+    typeof amountSpecified !== "string" ||
+    typeof amountOut !== "string" ||
+    typeof minAmountOut !== "string" ||
+    typeof sqrtPriceLimitX96 !== "string" ||
+    typeof quotedAt !== "string" ||
+    typeof expiresAt !== "string" ||
+    typeof quoteId !== "string" ||
+    typeof chainId !== "number" ||
+    !Number.isSafeInteger(chainId) ||
+    typeof zeroForOne !== "boolean" ||
+    typeof priceImpactBps !== "number" ||
+    !Number.isFinite(priceImpactBps) ||
+    priceImpactBps < 0 ||
+    priceImpactBps > 10_000 ||
+    typeof feePips !== "number" ||
+    !Number.isInteger(feePips) ||
+    feePips < 0 ||
+    feePips >= 1_000_000 ||
+    typeof blockNumber !== "number" ||
+    !Number.isSafeInteger(blockNumber) ||
+    blockNumber < 0 ||
+    typeof blockTimestamp !== "number" ||
+    !Number.isSafeInteger(blockTimestamp) ||
+    blockTimestamp < 0 ||
+    typeof sqrtPrice !== "string" ||
+    typeof tick !== "number" ||
+    !Number.isInteger(tick) ||
+    typeof liquidity !== "string"
+  ) {
+    return null;
+  }
+  if (
+    !/^0x[0-9a-fA-F]{64}$/.test(poolId) ||
+    !/^0x[0-9a-fA-F]{64}$/.test(quoteId) ||
+    !/^-[1-9]\d*$/.test(amountSpecified) ||
+    !isPositiveDecimalString(amountOut) ||
+    !isPositiveDecimalString(minAmountOut) ||
+    !isPositiveDecimalString(sqrtPriceLimitX96) ||
+    !isDecimalString(sqrtPrice) ||
+    !isDecimalString(liquidity) ||
+    !Number.isFinite(Date.parse(quotedAt)) ||
+    !Number.isFinite(Date.parse(expiresAt)) ||
+    BigInt(minAmountOut) > BigInt(amountOut) ||
+    Date.parse(expiresAt) <= Date.parse(quotedAt)
+  ) {
+    return null;
+  }
+  return {
+    chainId,
+    poolId,
+    zeroForOne,
+    amountSpecified,
+    amountOut,
+    minAmountOut,
+    priceImpactBps,
+    sqrtPriceLimitX96,
+    feePips,
+    blockNumber,
+    blockTimestamp,
+    quotedAt,
+    expiresAt,
+    quoteId,
+    poolState: { sqrtPriceX96: sqrtPrice, tick, liquidity },
   };
 }

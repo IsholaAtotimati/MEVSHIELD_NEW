@@ -56,6 +56,14 @@ export type ProtectedQuote =
       poolId: Hex;
       amountInBaseUnits: bigint;
       amountOutBaseUnits: bigint;
+      minAmountOutBaseUnits: bigint;
+      zeroForOne: boolean;
+      priceImpactBps: number;
+      sqrtPriceLimitX96: string;
+      quoteId: Hex;
+      blockNumber: number;
+      blockTimestamp: number;
+      expiresAtMs: number;
       quotedAtMs: number;
     };
 
@@ -107,6 +115,7 @@ export type SwapReadiness = {
 };
 
 export const POOL_STATE_MAX_AGE_MS = 15_000;
+export const MIN_EXECUTION_QUOTE_REMAINING_MS = 10_000;
 export const DEMO_MIN_AMOUNT_OUT = 1n;
 export const DEMO_USDC_PER_WETH = 2_000n;
 
@@ -283,6 +292,7 @@ export function isFreshQuote(
   nowMs = Date.now(),
   amountInBaseUnits?: bigint | null,
   poolId?: Hex,
+  zeroForOne?: boolean | null,
 ): boolean {
   return (
     quote.status === "available" &&
@@ -291,9 +301,33 @@ export function isFreshQuote(
     nowMs - quote.quotedAtMs <= POOL_STATE_MAX_AGE_MS &&
     quote.amountInBaseUnits > 0n &&
     quote.amountOutBaseUnits > 0n &&
+    quote.minAmountOutBaseUnits > 0n &&
+    quote.minAmountOutBaseUnits <= quote.amountOutBaseUnits &&
+    Number.isFinite(quote.expiresAtMs) &&
+    nowMs <= quote.expiresAtMs &&
+    Number.isFinite(quote.priceImpactBps) &&
+    quote.priceImpactBps >= 0 &&
+    Number.isSafeInteger(quote.blockNumber) &&
     /^0x[0-9a-fA-F]{64}$/.test(quote.poolId) &&
+    /^0x[0-9a-fA-F]{64}$/.test(quote.quoteId) &&
     (amountInBaseUnits === undefined || quote.amountInBaseUnits === amountInBaseUnits) &&
-    (poolId === undefined || quote.poolId.toLowerCase() === poolId.toLowerCase())
+    (poolId === undefined || quote.poolId.toLowerCase() === poolId.toLowerCase()) &&
+    (zeroForOne == null || quote.zeroForOne === zeroForOne)
+  );
+}
+
+export function hasSufficientQuoteWindow(
+  quote: ProtectedQuote,
+  nowMs = Date.now(),
+  minimumRemainingMs = MIN_EXECUTION_QUOTE_REMAINING_MS,
+  amountInBaseUnits?: bigint | null,
+  poolId?: Hex,
+  zeroForOne?: boolean | null,
+): boolean {
+  return (
+    isFreshQuote(quote, nowMs, amountInBaseUnits, poolId, zeroForOne) &&
+    quote.status === "available" &&
+    quote.expiresAtMs - nowMs >= minimumRemainingMs
   );
 }
 
@@ -313,6 +347,7 @@ export function isFreshDemoPoolReadiness(
 
 export function calculateSwapReadiness(input: {
   amountInBaseUnits: bigint | null;
+  zeroForOne?: boolean | null;
   quote: ProtectedQuote;
   nowMs?: number;
   demoMode?: boolean;
@@ -332,6 +367,7 @@ export function calculateSwapReadiness(input: {
     input.nowMs,
     input.amountInBaseUnits,
     input.poolId,
+    input.zeroForOne,
   );
   const positiveAmount =
     input.amountInBaseUnits !== null && input.amountInBaseUnits > 0n;
@@ -347,10 +383,15 @@ export function calculateSwapReadiness(input: {
   if (!positiveAmount) reasons.push("Enter a valid positive input amount.");
   if (!input.poolKeyMatches) reasons.push("The configured protected pool key is invalid.");
   if (!outputEstimateReady) {
+    const poolHasNoActiveLiquidity =
+      input.quote.status === "unavailable" &&
+      input.quote.reason === "zero-active-liquidity";
     reasons.push(
-      input.demoMode
-        ? "A valid deterministic demo estimate is unavailable."
-        : "A fresh quote for the protected pool is unavailable.",
+      poolHasNoActiveLiquidity
+        ? "The configured protected pool has no active liquidity. Add liquidity before signing or swapping."
+        : input.demoMode
+          ? "A valid deterministic demo estimate is unavailable."
+          : "A fresh quote for the protected pool is unavailable.",
     );
   }
   if (!input.backendPoolKeyVerified) reasons.push("The backend pool-key configuration is unverified.");
@@ -366,14 +407,24 @@ export function calculateSwapReadiness(input: {
     input.protocolAddressesVerified &&
     minimumOutputProtocolReady &&
     input.authorizationVerified;
-  const executionReasons = input.policyBoundsVerified
-    ? []
-    : ["Registered policy bounds are not verified."];
+  const executionReasons: string[] = [];
+  if (input.demoMode) {
+    executionReasons.push("Demo mode cannot execute protected swaps.");
+  }
+  if (input.readOnlyDemo) {
+    executionReasons.push("Swap execution is disabled in read-only demo mode.");
+  }
+  if (!input.policyBoundsVerified) {
+    executionReasons.push("Registered policy bounds are not verified.");
+  }
 
   return {
     canCheckRisk,
     canExecute:
-      !input.readOnlyDemo && canCheckRisk && input.policyBoundsVerified,
+      !input.readOnlyDemo &&
+      !input.demoMode &&
+      canCheckRisk &&
+      input.policyBoundsVerified,
     executionReasons,
     reasons,
   };

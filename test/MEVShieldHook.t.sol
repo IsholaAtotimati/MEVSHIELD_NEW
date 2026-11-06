@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Test} from "forge-std/Test.sol";
 
 import {MEVShieldHook} from "../src/MEVShieldHook.sol";
+import {MEVShieldRouter} from "../src/MEVShieldRouter.sol";
 import {PolicyRegistry} from "../src/PolicyRegistry.sol";
 import {PolicyVerifier} from "../src/PolicyVerifier.sol";
 import {PolicyAuthorization} from "../src/PolicyAuthorization.sol";
@@ -19,6 +20,7 @@ contract MEVShieldHookTest is Test {
     using PoolIdLibrary for PoolKey;
 
     MEVShieldHook internal hook;
+    MEVShieldRouter internal trustedRouter;
 
     PolicyRegistry internal registry;
     PolicyVerifier internal verifier;
@@ -46,7 +48,8 @@ contract MEVShieldHookTest is Test {
         verifier.setAuthorizedSigner(signer);
         registry.setAuthorizedConsumer(address(authorization));
 
-        hook = new MEVShieldHook(IPoolManager(poolManager), authorization);
+        trustedRouter = new MEVShieldRouter(IPoolManager(poolManager));
+        hook = new MEVShieldHook(IPoolManager(poolManager), authorization, address(trustedRouter));
         authorization.setAuthorizedHook(address(hook));
 
         key = PoolKey({
@@ -141,7 +144,9 @@ contract MEVShieldHookTest is Test {
         // but the current hook does not yet consume authorization.
         vm.prank(poolManager);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature, policy.maxLoss, policy.maxFee));
+        hook.beforeSwap(
+            address(trustedRouter), key, _params(), abi.encode(policy, signature, policy.maxLoss, policy.maxFee)
+        );
 
         // This assertion documents the desired state transition:
         // ACTIVE -> CONSUMED.
@@ -153,7 +158,8 @@ contract MEVShieldHookTest is Test {
 
         vm.prank(poolManager);
 
-        (bytes4 selector, BeforeSwapDelta delta, uint24 fee) = hook.beforeSwap(trader, key, _params(), hookData);
+        (bytes4 selector, BeforeSwapDelta delta, uint24 fee) =
+            hook.beforeSwap(address(trustedRouter), key, _params(), hookData);
 
         assertEq(selector, hook.beforeSwap.selector);
         assertEq(BeforeSwapDelta.unwrap(delta), BeforeSwapDelta.unwrap(BeforeSwapDeltaLibrary.ZERO_DELTA));
@@ -182,7 +188,7 @@ contract MEVShieldHookTest is Test {
 
         vm.prank(poolManager);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature, claimedLoss, claimedFee));
+        hook.beforeSwap(address(trustedRouter), key, _params(), abi.encode(policy, signature, claimedLoss, claimedFee));
 
         // Authorization succeeds because the supplied claims
         // do not exceed the signed limits.
@@ -208,7 +214,9 @@ contract MEVShieldHookTest is Test {
 
         vm.expectRevert(MEVShieldHook.MaxLossExceeded.selector);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature, policy.maxLoss + 1, policy.maxFee));
+        hook.beforeSwap(
+            address(trustedRouter), key, _params(), abi.encode(policy, signature, policy.maxLoss + 1, policy.maxFee)
+        );
 
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
@@ -232,7 +240,9 @@ contract MEVShieldHookTest is Test {
 
         vm.expectRevert(MEVShieldHook.MaxFeeExceeded.selector);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature, policy.maxLoss, policy.maxFee + 1));
+        hook.beforeSwap(
+            address(trustedRouter), key, _params(), abi.encode(policy, signature, policy.maxLoss, policy.maxFee + 1)
+        );
 
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
@@ -247,7 +257,9 @@ contract MEVShieldHookTest is Test {
 
         vm.prank(poolManager);
         vm.expectRevert(MEVShieldHook.InvalidMinimumOutput.selector);
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature, policy.maxLoss, policy.maxFee));
+        hook.beforeSwap(
+            address(trustedRouter), key, _params(), abi.encode(policy, signature, policy.maxLoss, policy.maxFee)
+        );
         assertFalse(registry.isConsumed(policy.trader, policy.nonce));
     }
 
@@ -262,17 +274,16 @@ contract MEVShieldHookTest is Test {
 
         vm.expectRevert(MEVShieldHook.PoolMismatch.selector);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature));
+        hook.beforeSwap(address(trustedRouter), key, _params(), abi.encode(policy, signature));
     }
 
-    function test_RevertWhenTraderDoesNotMatchPolicy() public {
+    function test_RevertWhenCallerIsNotTrustedRouter() public {
         MEVShieldHook.Policy memory policy = _policy();
 
         bytes memory signature = _signPolicy(policy);
 
         vm.prank(poolManager);
-
-        vm.expectRevert(MEVShieldHook.TraderMismatch.selector);
+        vm.expectRevert(MEVShieldHook.UnauthorizedRouter.selector);
 
         hook.beforeSwap(attacker, key, _params(), abi.encode(policy, signature));
     }
@@ -288,7 +299,7 @@ contract MEVShieldHookTest is Test {
 
         vm.expectRevert(MEVShieldHook.PolicyExpired.selector);
 
-        hook.beforeSwap(trader, key, _params(), abi.encode(policy, signature));
+        hook.beforeSwap(address(trustedRouter), key, _params(), abi.encode(policy, signature));
     }
 
     function test_RevertWhenCallerIsNotPoolManager() public {
@@ -297,6 +308,6 @@ contract MEVShieldHookTest is Test {
         vm.expectRevert(MEVShieldHook.Unauthorized.selector);
         vm.prank(attacker);
 
-        hook.beforeSwap(trader, key, _params(), hookData);
+        hook.beforeSwap(address(trustedRouter), key, _params(), hookData);
     }
 }

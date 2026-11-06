@@ -15,6 +15,7 @@ import {
 } from "../config/env";
 import {
   SWAP_POOL_CONFIGURATION,
+  SWAP_POOL_ID,
   SWAP_TOKENS,
   type TokenSymbol,
 } from "../config/swapPool";
@@ -24,6 +25,7 @@ import { usePolicy } from "../hooks/usePolicy";
 import { useProtectedQuote } from "../hooks/useProtectedQuote";
 import { useProtocol } from "../hooks/useProtocol";
 import { useTokenBalance } from "../hooks/useTokenBalance";
+import { useTokenAllowance } from "../hooks/useTokenAllowance";
 import { useWallet } from "../hooks/useWallet";
 import {
   calculateDemoOutput,
@@ -34,18 +36,25 @@ import {
   type SwapReadiness,
 } from "../lib/protectedQuote";
 import { isDecimalString, isPositiveDecimalString } from "../lib/apiValidation";
+import { CONTRACTS } from "../lib/contracts";
+import { getPolicyExecutionIssues } from "../lib/policyExecutionReadiness";
 import type { PolicyResponse } from "../lib/types";
 
 type TradeContextValue = ReturnType<typeof useTradeState>;
 
 const TradeContext = createContext<TradeContextValue | null>(null);
 
-function hasValidPolicyBounds(policy: PolicyResponse | null): boolean {
+function hasValidPolicyBounds(
+  policy: PolicyResponse | null,
+  nowMs: number,
+): boolean {
   return Boolean(
     policy?.registered &&
       isDecimalString(policy.policy.maxLoss) &&
       isDecimalString(policy.policy.maxFee) &&
-      isPositiveDecimalString(policy.policy.minAmountOut),
+      isPositiveDecimalString(policy.policy.minAmountOut) &&
+      /^\d+$/.test(policy.policy.expiry) &&
+      BigInt(policy.policy.expiry) > BigInt(Math.floor(nowMs / 1000)),
   );
 }
 
@@ -85,7 +94,10 @@ function useTradeState() {
           SWAP_POOL_CONFIGURATION.poolKey,
         )
       : null;
-  const quoteIsFresh = quoteHook.isQuoteFresh(inputAmountBaseUnits);
+  const quoteIsFresh = quoteHook.isQuoteFresh(
+    inputAmountBaseUnits,
+    zeroForOne,
+  );
   const demoEstimateBaseUnits =
     DEMO_ESTIMATE_MODE && inputAmountBaseUnits !== null && zeroForOne !== null
       ? calculateDemoOutput(inputAmountBaseUnits, zeroForOne)
@@ -93,6 +105,34 @@ function useTradeState() {
   const demoEstimateReady =
     demoEstimateBaseUnits !== null &&
     isFreshDemoPoolReadiness(quoteHook.protectedQuote, quoteHook.quoteClockMs);
+
+  useEffect(() => {
+    if (
+      DEMO_ESTIMATE_MODE ||
+      inputAmountBaseUnits === null ||
+      inputAmountBaseUnits <= 0n ||
+      zeroForOne === null
+    ) {
+      return;
+    }
+    const request = () =>
+      void quoteHook.refreshLiveQuote(
+        inputAmountBaseUnits,
+        zeroForOne,
+        slippageBps,
+      );
+    const debounce = window.setTimeout(request, 250);
+    const refresh = window.setInterval(request, 8_000);
+    return () => {
+      window.clearTimeout(debounce);
+      window.clearInterval(refresh);
+    };
+  }, [
+    inputAmountBaseUnits,
+    quoteHook.refreshLiveQuote,
+    slippageBps,
+    zeroForOne,
+  ]);
 
   const policyHook = usePolicy({
     account: wallet.account,
@@ -108,6 +148,7 @@ function useTradeState() {
     quoteIsFresh,
     demoEstimateReady,
     quoteClockMs: quoteHook.quoteClockMs,
+    refreshLiveQuote: quoteHook.refreshLiveQuote,
     backendPoolKeyVerified: quoteHook.backendPoolKeyVerified,
     protocolAddressesVerified: protocol.protocolAddressesVerified,
     authorizationVerified: protocol.hasAuthorization,
@@ -115,7 +156,28 @@ function useTradeState() {
     onPolicyCleared: () => setClearExecutionTick((value) => value + 1),
   });
 
-  const policyBoundsVerified = hasValidPolicyBounds(policyHook.policy);
+  const tokenAllowance = useTokenAllowance(
+    wallet.account,
+    inputTokenAddress,
+    CONTRACTS.mevShieldRouter,
+    policyHook.policy?.registered === true,
+  );
+  const policyExecutionReasons = getPolicyExecutionIssues({
+    policy: policyHook.policy,
+    nowMs: quoteHook.nowMs,
+    poolId: SWAP_POOL_ID,
+    account: wallet.account,
+    amountInBaseUnits: inputAmountBaseUnits,
+    zeroForOne,
+    quote: quoteHook.protectedQuote,
+    quoteIsFresh,
+    allowance: tokenAllowance.allowance,
+    allowanceIsChecking: tokenAllowance.isChecking,
+    allowanceError: tokenAllowance.error,
+  });
+  const policyBoundsVerified =
+    hasValidPolicyBounds(policyHook.policy, quoteHook.nowMs) &&
+    policyExecutionReasons.length === 0;
 
   /**
    * Readiness for a configured pool. `null` when the local build has no token
@@ -127,7 +189,8 @@ function useTradeState() {
       : calculateSwapReadiness({
           amountInBaseUnits: inputAmountBaseUnits,
           quote: quoteHook.protectedQuote,
-          nowMs: quoteHook.quoteClockMs,
+          nowMs: quoteHook.nowMs,
+          zeroForOne,
           poolId: SWAP_POOL_CONFIGURATION.poolId,
           poolKeyMatches: zeroForOne !== null,
           backendPoolKeyVerified: quoteHook.backendPoolKeyVerified,
@@ -163,6 +226,48 @@ function useTradeState() {
             ...(baseSwapReadiness?.reasons ?? []),
           ],
         };
+  if (policyHook.policy?.registered) {
+    swapReadiness.executionReasons = [
+      ...swapReadiness.reasons,
+      ...policyExecutionReasons,
+    ];
+  }
+  if (quoteHook.backendConfigError) {
+    swapReadiness.reasons.push(quoteHook.backendConfigError);
+    if (policyHook.policy?.registered) {
+      swapReadiness.executionReasons.push(quoteHook.backendConfigError);
+    }
+  }
+  if (backend.healthState === "failed" && backend.healthError) {
+    swapReadiness.reasons.push(backend.healthError);
+    if (policyHook.policy?.registered) {
+      swapReadiness.executionReasons.push(backend.healthError);
+    }
+  } else if (backend.healthState === "checking") {
+    swapReadiness.reasons.push("Checking backend availability.");
+  }
+  if (
+    backend.healthState === "ok" &&
+    backend.health?.policySigningEnabled !== true
+  ) {
+    swapReadiness.reasons.push("Backend policy signing is disabled.");
+  }
+  if (!protocol.protocolAddressesVerified) {
+    swapReadiness.reasons.push(
+      protocol.protocolStatus === "Checking protocol..."
+        ? "Checking Deployment B contract wiring on Sepolia."
+        : protocol.protocolStatus === "Protocol connected"
+          ? "Deployment B contract wiring does not match the configured addresses."
+          : protocol.protocolStatus,
+    );
+  }
+  if (quoteHook.quoteError && !quoteIsFresh) {
+    const reason = `Live quote unavailable: ${quoteHook.quoteError}`;
+    swapReadiness.reasons.push(reason);
+    if (policyHook.policy?.registered) {
+      swapReadiness.executionReasons.push(reason);
+    }
+  }
 
   const executionHook = useExecution({
     account: wallet.account,
@@ -243,6 +348,7 @@ function useTradeState() {
     setSlippageBps,
     inputAmountBaseUnits,
     inputTokenBalance: inputTokenBalance.balance,
+    tokenAllowance,
     refreshInputTokenBalance: inputTokenBalance.refresh,
     zeroForOne,
     quoteIsFresh,

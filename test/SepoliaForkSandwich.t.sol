@@ -71,10 +71,10 @@ contract SepoliaForkSandwichTest is Test {
     address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address private constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address private constant HOOK = 0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
-    address private constant LIVE_ROUTER = 0x633282608B2fc66cD7572f5eF58e804063aa150D;
+    address private constant HOOK = 0x15D8C5eb1b839A4Fd86989348c1371c10168c080;
+    address private constant LIVE_ROUTER = 0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283;
     address private constant LIVE_AUTHORIZED_SIGNER = 0x016B78a30CE176EF0B90c122e8677e13aAB2A815;
-    bytes32 private constant EXPECTED_POOL_ID = 0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    bytes32 private constant EXPECTED_POOL_ID = 0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235;
 
     IPoolManager private manager;
     PolicyRegistry private registry;
@@ -128,13 +128,14 @@ contract SepoliaForkSandwichTest is Test {
         verifier.setAuthorizedSigner(signer);
         registry.setAuthorizedConsumer(address(authorization));
 
-        MEVShieldHook implementation = new MEVShieldHook(manager, authorization);
+        MEVShieldHook implementation = new MEVShieldHook(manager, authorization, address(router));
         vm.etch(HOOK, address(implementation).code);
         MEVShieldHook hook = MEVShieldHook(HOOK);
         authorization.setAuthorizedHook(address(hook));
         registry.setAuthorizedRegistrar(address(authorization));
         require(address(hook.poolManager()) == POOL_MANAGER, "etched hook PoolManager mismatch");
         require(address(hook.authorization()) == address(authorization), "etched hook authorization mismatch");
+        require(address(hook.trustedRouter()) == address(router), "fork hook trusted router mismatch");
 
         attacker = makeAddr("fork-attacker");
         victim = makeAddr("fork-victim");
@@ -167,28 +168,31 @@ contract SepoliaForkSandwichTest is Test {
 
         MEVShieldHook.Policy memory protectedPolicy =
             _registerPolicy(true, -int256(VICTIM_USDC_IN), victimLimit, quotedOut);
-        assertFalse(registry.isConsumed(address(router), protectedPolicy.nonce), "protected nonce consumed before the swap");
+        assertFalse(
+            registry.isConsumed(address(router), protectedPolicy.nonce), "protected nonce consumed before the swap"
+        );
 
         deal(USDC, victim, VICTIM_USDC_IN);
         uint256 usdcBefore = IERC20Minimal(USDC).balanceOf(victim);
         uint256 wethBefore = IERC20Minimal(WETH).balanceOf(victim);
         vm.startPrank(victim);
         require(IERC20Minimal(USDC).approve(address(router), VICTIM_USDC_IN), "victim USDC approval failed");
-        (bool ok, bytes memory reason) = address(router).call(
-            abi.encodeCall(
-                router.executeSwap,
-                (
-                    poolKey,
-                    IPoolManager.SwapParams({
-                        zeroForOne: true,
-                        amountSpecified: protectedPolicy.amountSpecified,
-                        sqrtPriceLimitX96: protectedPolicy.sqrtPriceLimitX96
-                    }),
-                    abi.encode(protectedPolicy, _signature(protectedPolicy), uint256(0), uint256(0)),
-                    victim
+        (bool ok, bytes memory reason) = address(router)
+            .call(
+                abi.encodeCall(
+                    router.executeSwap,
+                    (
+                        poolKey,
+                        IPoolManager.SwapParams({
+                            zeroForOne: true,
+                            amountSpecified: protectedPolicy.amountSpecified,
+                            sqrtPriceLimitX96: protectedPolicy.sqrtPriceLimitX96
+                        }),
+                        abi.encode(protectedPolicy, _signature(protectedPolicy), uint256(0), uint256(0)),
+                        victim
+                    )
                 )
-            )
-        );
+            );
         vm.stopPrank();
 
         assertFalse(ok, "protected swap succeeded after the attacker moved the pool");
@@ -218,10 +222,11 @@ contract SepoliaForkSandwichTest is Test {
         );
         assertEq(IERC20Minimal(USDC).balanceOf(victim), usdcBefore, "reverted swap spent victim USDC");
         assertEq(IERC20Minimal(WETH).balanceOf(victim), wethBefore, "reverted swap paid the victim WETH");
-        assertTrue(registry.isRegistered(address(router), protectedPolicy.nonce), "protected policy registration was lost");
+        assertTrue(
+            registry.isRegistered(address(router), protectedPolicy.nonce), "protected policy registration was lost"
+        );
         assertFalse(
-            registry.isConsumed(address(router), protectedPolicy.nonce),
-            "reverted swap left the policy nonce consumed"
+            registry.isConsumed(address(router), protectedPolicy.nonce), "reverted swap left the policy nonce consumed"
         );
     }
 
@@ -239,9 +244,7 @@ contract SepoliaForkSandwichTest is Test {
         BalanceDelta delta = router.executeSwap(
             poolKey,
             IPoolManager.SwapParams({
-                zeroForOne: true,
-                amountSpecified: policy.amountSpecified,
-                sqrtPriceLimitX96: policy.sqrtPriceLimitX96
+                zeroForOne: true, amountSpecified: policy.amountSpecified, sqrtPriceLimitX96: policy.sqrtPriceLimitX96
             }),
             abi.encode(policy, _signature(policy), uint256(0), uint256(0)),
             payer

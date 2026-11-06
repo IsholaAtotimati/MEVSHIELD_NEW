@@ -27,7 +27,7 @@ The two diagnostic scripts now live under `backend/scripts/`, outside the `src` 
 graph LR
   req["HTTP request"] --> rid["requestIdMiddleware"]
   rid --> life["httpLifecycleMiddleware"]
-  life --> cors["cors with one origin"]
+  life --> cors["cors with configured frontend origins"]
   cors --> json["express.json"]
   json --> route["route handler"]
   route --> err["error middleware"]
@@ -37,7 +37,7 @@ graph LR
 
 `httpLifecycleMiddleware` logs one `http_request` record per completed response with method, path, status and duration ([backend/src/middleware/httpLifecycle.ts:5](../../backend/src/middleware/httpLifecycle.ts#L5)).
 
-CORS allows exactly one origin, `FRONTEND_URL`, defaulting to `http://localhost:5173`, and exposes `x-request-id` ([backend/src/server.ts:86](../../backend/src/server.ts#L86)).
+CORS allows the comma-separated origins in `FRONTEND_URL` (defaulting to `http://localhost:5173` outside production) and exposes `x-request-id`. The first origin is the SIWE authentication domain; production startup requires it.
 
 The JSON body limit is the Express default. A malformed JSON body is caught by the final error middleware and answered with 400, `code: "invalid_json"`, and the request id ([backend/src/server.ts:363](../../backend/src/server.ts#L363)).
 
@@ -52,10 +52,11 @@ Startup requires, in order:
 1. `CHAIN_ID` present and equal to `11155111`. Anything else throws ([backend/src/config/runtimeConfig.ts:79](../../backend/src/config/runtimeConfig.ts#L79)).
 2. The six `PROTECTED_POOL_*` variables present, well formed, in ascending currency order, with a 32-byte `PROTECTED_POOL_ID` ([backend/src/config/runtimeConfig.ts:69](../../backend/src/config/runtimeConfig.ts#L69)).
 3. The pool id recomputed from the pool key, and compared to the configured id. A mismatch throws ([backend/src/config/runtimeConfig.ts:93](../../backend/src/config/runtimeConfig.ts#L93)).
-4. The whole pool key and derived id compared to the pinned Sepolia WETH/USDC pool constants. A mismatch throws ([backend/src/config/runtimeConfig.ts:97](../../backend/src/config/runtimeConfig.ts#L97)).
+4. The whole pool key and derived id compared to the legacy Sepolia pins, unless the complete replacement pin set is explicitly enabled with `MEVSHIELD_V2_DEPLOYMENT_VERIFIED=true`. The replacement path still validates the configured hook and independently supplied Pool ID.
 5. A verifier address from any of `POLICY_VERIFIER_ADDRESS`, `VERIFIER_ADDRESS`, `POLICY_VERIFIER`, compared to the pinned verifier. A mismatch throws ([backend/src/config/runtimeConfig.ts:180](../../backend/src/config/runtimeConfig.ts#L180)).
-6. A router address from `ROUTER_ADDRESS` or `MEVSHIELD_ROUTER`, compared to the pinned router. A mismatch throws ([backend/src/config/runtimeConfig.ts:216](../../backend/src/config/runtimeConfig.ts#L216)).
+6. A router address from `ROUTER_ADDRESS` or `MEVSHIELD_ROUTER`, compared to the active router pin. Conflicting aliases throw rather than silently selecting one.
 7. `SIGNER_PRIVATE_KEY`, but only when signing is enabled. The derived address must equal the pinned signer ([backend/src/config/runtimeConfig.ts:195](../../backend/src/config/runtimeConfig.ts#L195) to [backend/src/config/runtimeConfig.ts:210](../../backend/src/config/runtimeConfig.ts#L210)).
+8. `REDIS_URL` in production. Startup connects to Redis before binding the HTTP listener; missing or unavailable Redis is fatal. Local development may omit it and uses process-local memory state.
 
 `SIGNER_PRIVATE_KEY` being optional when signing is disabled is the reason the process can run in a read-only configuration. Error messages never include the key material, and `runtimeConfig.test.ts` asserts that.
 
@@ -65,29 +66,29 @@ The listener binds `0.0.0.0` on `PORT`, defaulting to 4000 ([backend/src/server.
 
 ## Fail-closed Sepolia pinning
 
-The backend is pinned to one deployment. This is deliberate and it is the main safety property of the service.
+The backend is pinned to one deployment. This is deliberate and it is the main safety property of the service. Replacement Sepolia pins can be supplied only when `MEVSHIELD_V2_DEPLOYMENT_VERIFIED=true`; this flag is an operator assertion after successful preflight, not a backend on-chain verification.
 
 | Pinned constant | Value | Enforced against |
 | --- | --- | --- |
 | `SEPOLIA_CHAIN_ID` | `11155111` | `CHAIN_ID` and the monitor's `eth_chainId` |
-| `EXPECTED_SEPOLIA_VERIFIER` | `0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f` | Any configured verifier alias |
-| `EXPECTED_SEPOLIA_ROUTER` | `0x633282608B2fc66cD7572f5eF58e804063aa150D` | Any configured router alias |
-| `EXPECTED_AUTHORIZED_SIGNER` | `0x016B78a30CE176EF0B90c122e8677e13aAB2A815` | The address derived from `SIGNER_PRIVATE_KEY` |
-| `EXPECTED_PROTECTED_POOL` | pool key plus pool id `0x9275…b602` | The six `PROTECTED_POOL_*` variables, both individually and through the derived id |
+| Default Sepolia pins | Existing source constants | Used unless replacement pinning is explicitly enabled |
+| `MEVSHIELD_SEPOLIA_*_ADDRESS` | Required replacement signer, verifier, router, registry, authorization, and hook | Compared with corresponding environment configuration when replacement pinning is enabled |
+| `MEVSHIELD_SEPOLIA_POOL_ID` | Required replacement pool ID | Compared with the configured, recomputed Pool ID |
+| `MEVSHIELD_V2_DEPLOYMENT_VERIFIED` | `false` unless explicitly set | Allows replacement values only after a separate read-only deployment preflight |
 
 The constants are declared at [backend/src/config/runtimeConfig.ts:9](../../backend/src/config/runtimeConfig.ts#L9) to [backend/src/config/runtimeConfig.ts:22](../../backend/src/config/runtimeConfig.ts#L22).
 
 Consequences a reader should internalise:
 
-- The backend cannot be pointed at a local Anvil deployment or a different Sepolia pool without editing source. There is no override flag.
+- The backend rejects a replacement pin set unless the explicit verification flag and every required pin are present.
 - A stale environment file is a startup failure, not a degraded mode. That is the intent.
-- The pinned values must be edited in code, reviewed, and redeployed when the contracts are redeployed. A configuration file alone cannot retarget the service.
+- The verification flag does not query Sepolia; run the read-only deployment preflight before setting it. The frontend has its own execution gate.
 
 The pool configuration is exposed to clients through `GET /config/protected-pool`, which reports `configurationStatus: "valid"` and `poolReadiness: "not-checked"` ([backend/src/config/runtimeConfig.ts:120](../../backend/src/config/runtimeConfig.ts#L120)). The `not-checked` value is not a placeholder for an unimplemented check that would return `ready`: this route does not read the pool. Pool readiness for the trade page is still assessed by the frontend from RPC reads. `runtimeConfig.test.ts` has a test asserting the response does not claim the pool is initialised or liquid. `/risk-preview` and `/policy` do read `slot0` and active liquidity, and only for the price-impact estimate below.
 
 ## Policy signing gate
 
-Signing is enabled by `resolvePolicySigningEnabled`, which returns true when `MEVSHIELD_V2_POLICY_ENABLED` is exactly `"true"`, or when local demo mode is on ([backend/src/server.ts:48](../../backend/src/server.ts#L48)).
+Sepolia signing is enabled by `resolvePolicySigningEnabled` only when both `MEVSHIELD_V2_POLICY_ENABLED` and `MEVSHIELD_V2_DEPLOYMENT_VERIFIED` are exactly `"true"`, or when the explicitly gated local demo mode is on. The verified-deployment path also requires complete matching address and pool pins before the server starts.
 
 Local demo mode requires `MEVSHIELD_SEPOLIA_DEMO_ENABLED=true`, `NODE_ENV` not equal to `production`, and `RAILWAY_ENVIRONMENT_NAME` unset ([backend/src/config/runtimeConfig.ts:145](../../backend/src/config/runtimeConfig.ts#L145)). Demo mode therefore cannot be enabled on Railway or in a production build by setting the flag alone.
 
@@ -162,7 +163,11 @@ The signing key is loaded into memory once at startup as an ethers `Wallet`. The
 
 These are behaviours of the current code that a reader should not have to discover by testing.
 
-- No caller authentication on any route. CORS restricts browsers to one origin; it does not restrict non-browser clients. When signing is enabled, any client that can reach the process can obtain a signature from the authorized on-chain signer for any `minAmountOut`, subject only to the schema and the pinned pool and trader. There is no rate limit.
+- `/policy` requires a wallet-authenticated, short-lived SIWE session. Nonce verification binds the signature to the configured application domain and configured chain, consumes the nonce on first verification attempt, and binds the session wallet to `policy.trader`. Nonce and verification endpoints, plus `/policy`, have socket-IP limits; `/policy` also has a wallet limit.
+- Authentication nonces and sessions, rate-limit counters, and the 15-second protected quote authorization cache use Redis in production. Atomic Redis scripts consume nonces once and update rate counters across replicas. Redis TTLs expire nonce/session/rate/quote entries; a Redis outage fails closed with 503 for affected operations. The in-memory implementation is for local development and tests only.
+- Configure Railway's `REDIS_URL` with its private Redis connection URL. The URL is a secret and must not be added to Vite variables or committed. Redis availability is required to start every production instance.
+- Socket IP is taken from the TCP connection. Forwarded IP headers are deliberately ignored; on Railway this can aggregate traffic behind proxy addresses and reduce per-client accuracy.
+- Production startup requires `FRONTEND_URL`; its first comma-separated origin is the SIWE domain and URI. The frontend authenticates by requesting a one-time message, calling the connected wallet's `signMessage`, and exchanging that signature for a bearer session before requesting `/policy`.
 - No request-size or numeric bound beyond the schema. `amountSpecified` and `expiry` are bounded by regex and by the 30-minute expiry window; `poolId` and `trader` are regex-checked hex.
 - The frontend requests a 10-minute lifetime through `buildPolicyExpiry`, which stays inside the backend's 30-minute ceiling ([frontend/src/config/policy.ts:23](../../frontend/src/config/policy.ts#L23), [backend/src/policy/policyRequest.ts:6](../../backend/src/policy/policyRequest.ts#L6)). The ceiling is short on purpose: it bounds the replay window for a signed policy. The frontend mirrors the ceiling as a local constant rather than importing it, so the two values could drift in principle; `frontend/src/config/policy.test.mjs` fails when the requested TTL reaches or exceeds the mirrored ceiling. See [data model](../architecture/data-model.md#nonce-lifecycle).
 - `generatePolicy` has no direct unit test. It is exercised only through the route tests, and only up to the point where a signer would be required.

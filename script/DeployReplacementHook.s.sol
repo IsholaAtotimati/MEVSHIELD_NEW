@@ -9,12 +9,9 @@ import {PolicyAuthorization} from "../src/PolicyAuthorization.sol";
 import {MEVShieldHook} from "../src/MEVShieldHook.sol";
 
 contract DeployReplacementHook is Script {
-    address constant MANAGER =
-        0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address constant AUTHORIZATION =
-        0x0Ebb15276f230130DD238fa1581d4379488111f5;
-    address constant CREATE2_DEPLOYER =
-        0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    address constant MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+    address constant AUTHORIZATION = 0x0Ebb15276f230130DD238fa1581d4379488111f5;
+    address constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     uint160 constant HOOK_MASK = (1 << 14) - 1;
     uint160 constant REQUIRED_FLAGS = 1 << 7;
@@ -28,17 +25,10 @@ contract DeployReplacementHook is Script {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerKey);
 
-        require(
-            deployer == 0x016B78a30CE176EF0B90c122e8677e13aAB2A815,
-            "Unexpected deployer"
-        );
+        require(deployer == 0x016B78a30CE176EF0B90c122e8677e13aAB2A815, "Unexpected deployer");
 
         bytes memory initCode = abi.encodePacked(
-            type(MEVShieldHook).creationCode,
-            abi.encode(
-                IPoolManager(MANAGER),
-                PolicyAuthorization(AUTHORIZATION)
-            )
+            type(MEVShieldHook).creationCode, abi.encode(IPoolManager(MANAGER), PolicyAuthorization(AUTHORIZATION))
         );
         bytes32 initCodeHash = keccak256(initCode);
 
@@ -50,16 +40,7 @@ contract DeployReplacementHook is Script {
             bytes32 candidateSalt = bytes32(i);
             address candidate = address(
                 uint160(
-                    uint256(
-                        keccak256(
-                            abi.encodePacked(
-                                bytes1(0xff),
-                                CREATE2_DEPLOYER,
-                                candidateSalt,
-                                initCodeHash
-                            )
-                        )
-                    )
+                    uint256(keccak256(abi.encodePacked(bytes1(0xff), CREATE2_DEPLOYER, candidateSalt, initCodeHash)))
                 )
             );
 
@@ -95,22 +76,19 @@ contract DeployReplacementHook is Script {
             afterRemoveLiquidityReturnDelta: false
         });
 
-        Hooks.validateHookPermissions(
-            MEVShieldHook(payable(predictedHook)),
-            permissions
-        );
+        Hooks.validateHookPermissions(MEVShieldHook(payable(predictedHook)), permissions);
 
         console2.log("Chain ID:", block.chainid);
         console2.log("Deployer:", deployer);
         console2.log("Existing PoolManager:", MANAGER);
         console2.log("Existing Authorization:", AUTHORIZATION);
         console2.log("Predicted replacement hook:", predictedHook);
-        console2.log("CREATE2 salt:"); console2.logBytes32(salt);
+        console2.log("CREATE2 salt:");
+        console2.logBytes32(salt);
         console2.log("Permission bits:", uint256(uint160(predictedHook) & HOOK_MASK));
 
         vm.startBroadcast(deployerKey);
-        (bool success, bytes memory result) =
-            CREATE2_DEPLOYER.call(abi.encodePacked(salt, initCode));
+        (bool success, bytes memory result) = CREATE2_DEPLOYER.call(abi.encodePacked(salt, initCode));
         vm.stopBroadcast();
 
         require(success, "CREATE2 deployment call failed");
@@ -123,10 +101,7 @@ contract DeployReplacementHook is Script {
         MEVShieldHook hook = MEVShieldHook(payable(deployedHook));
         require(address(hook.poolManager()) == MANAGER, "Manager mismatch");
         require(address(hook.authorization()) == AUTHORIZATION, "Authorization mismatch");
-        require(
-            (uint160(deployedHook) & HOOK_MASK) == REQUIRED_FLAGS,
-            "Permission flags mismatch"
-        );
+        require((uint160(deployedHook) & HOOK_MASK) == REQUIRED_FLAGS, "Permission flags mismatch");
 
         console2.log("Verified replacement hook:", deployedHook);
         console2.log("Replacement hook checks passed.");

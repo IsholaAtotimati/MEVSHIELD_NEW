@@ -65,9 +65,7 @@ contract PolicyAuthorizationTest is Test {
     }
 
     function _registerPolicy(PolicyVerifier.Policy memory p) internal returns (bytes32 policyId) {
-        policyId = registry.registerPolicy(
-            p.poolId, p.trader, p.nonce, p.expiry, p.maxLoss, p.maxFee, p.minAmountOut
-        );
+        policyId = registry.registerPolicy(p.poolId, p.trader, p.nonce, p.expiry, p.maxLoss, p.maxFee, p.minAmountOut);
     }
 
     /*

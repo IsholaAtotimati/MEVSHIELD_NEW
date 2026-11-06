@@ -93,7 +93,7 @@ There are five boundaries worth naming.
 
 1. Wallet to chain. The user signs `registerPolicy` and `executeSwap`. The router sets `payer` to `msg.sender` ([src/MEVShieldRouter.sol:79](../../src/MEVShieldRouter.sol#L79)) and accepts a separate `recipient` argument that the caller chooses. The policy does not cover payer or recipient.
 2. Backend to chain. The backend signs the policy. That signature is the only thing that makes a policy registrable and authorizable. The signing key lives in an in-process wallet built from `SIGNER_PRIVATE_KEY` at startup ([backend/src/config/runtimeConfig.ts:198](../../backend/src/config/runtimeConfig.ts#L198)).
-3. Browser to backend. The backend applies no caller authentication. CORS is restricted to one origin ([backend/src/server.ts:86](../../backend/src/server.ts#L86)) but that is a browser control, not a server-side authorization check.
+3. Browser to backend. `POST /policy` requires a short-lived SIWE bearer session bound to the configured frontend domain and Sepolia chain; the authenticated wallet must match the policy trader. CORS allows configured `FRONTEND_URL` origins ([backend/src/server.ts:86](../../backend/src/server.ts#L86)), but remains a browser control rather than server-side authorization.
 4. Hook to PoolManager. `beforeSwap` is guarded by `onlyPoolManager` ([src/MEVShieldHook.sol:31](../../src/MEVShieldHook.sol#L31)). The hook cannot be called by arbitrary accounts.
 5. Router to PoolManager. `unlockCallback` is guarded by an explicit `msg.sender == poolManager` check ([src/MEVShieldRouter.sol:96](../../src/MEVShieldRouter.sol#L96)).
 
@@ -185,13 +185,13 @@ The deployed Sepolia addresses are recorded twice, once in the frontend and once
 | Contract | Address | Source of truth in the repository |
 | --- | --- | --- |
 | PoolManager | `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543` | [frontend/src/lib/contracts.ts:20](../../frontend/src/lib/contracts.ts#L20) |
-| PolicyRegistry | `0xB2897da1CfC0c73C3983221a87C27586D1cE1c9E` | [frontend/src/lib/contracts.ts:23](../../frontend/src/lib/contracts.ts#L23) |
-| PolicyVerifier | `0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f` | [backend/src/config/runtimeConfig.ts:12](../../backend/src/config/runtimeConfig.ts#L12) |
-| PolicyAuthorization | `0xefC9bc21f1ab3564232a3216f0e45d5caE3Bd7c5` | [frontend/src/lib/contracts.ts:28](../../frontend/src/lib/contracts.ts#L28) |
-| MEVShieldHook | `0xd15e4fdd391a68c2f1c385d1a819117a3ad40080` | [frontend/src/lib/contracts.ts:34](../../frontend/src/lib/contracts.ts#L34) |
-| MEVShieldRouter | `0x633282608B2fc66cD7572f5eF58e804063aa150D` | [backend/src/config/runtimeConfig.ts:20](../../backend/src/config/runtimeConfig.ts#L20) |
+| PolicyRegistry | `0x3b1b05954b226633e87cC875593E5E8FB998eFBC` | [frontend/src/lib/contracts.ts:23](../../frontend/src/lib/contracts.ts#L23) |
+| PolicyVerifier | `0xD3635b589dB0B4E215283274937C0b7600314A6d` | [backend/src/config/runtimeConfig.ts:12](../../backend/src/config/runtimeConfig.ts#L12) |
+| PolicyAuthorization | `0xEDC98B44349EDF0D0b71cBc5D4523352ffB8c821` | [frontend/src/lib/contracts.ts:28](../../frontend/src/lib/contracts.ts#L28) |
+| MEVShieldHook | `0x15D8C5eb1b839A4Fd86989348c1371c10168c080` | [frontend/src/lib/contracts.ts:34](../../frontend/src/lib/contracts.ts#L34) |
+| MEVShieldRouter | `0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283` | [backend/src/config/runtimeConfig.ts:20](../../backend/src/config/runtimeConfig.ts#L20) |
 | Authorized signer | `0x016B78a30CE176EF0B90c122e8677e13aAB2A815` | [backend/src/config/runtimeConfig.ts:10](../../backend/src/config/runtimeConfig.ts#L10) |
-| Protected pool id | `0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602` | [backend/src/config/runtimeConfig.ts:23](../../backend/src/config/runtimeConfig.ts#L23) |
+| Protected pool id | `0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235` | [backend/src/config/runtimeConfig.ts:23](../../backend/src/config/runtimeConfig.ts#L23) |
 
 The router exposes only `poolManager()` as an immutable getter. It has no `protectedPoolId()` or `protectedHook()` function, and never did in any committed revision. Any component that needs the protected pool id or hook address reads it from configuration. See [ADR 0003](../decisions/0003-config-sourced-pool-identity.md).
 

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseHealthBody } from "./apiValidation.ts";
+import {
+  parseHealthBody,
+  parseLiveProtectedQuoteBody,
+} from "./apiValidation.ts";
 import { formatTokenAmount } from "./format.ts";
 
 test("parses the monitor status and last checked block from /health", () => {
@@ -50,6 +53,47 @@ test("rejects bodies that are not health payloads", () => {
   assert.equal(parseHealthBody(null), null);
   assert.equal(parseHealthBody("ok"), null);
   assert.equal(parseHealthBody({ service: "mevshield-backend" }), null);
+});
+
+test("validates live quote amounts, direction, block metadata, and expiry", () => {
+  const quote = {
+    chainId: 11155111,
+    poolId:
+      "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235",
+    zeroForOne: true,
+    amountSpecified: "-1000000",
+    amountOut: "500",
+    minAmountOut: "497",
+    priceImpactBps: 12,
+    sqrtPriceLimitX96: "79228162514264337593543950336",
+    feePips: 3000,
+    blockNumber: 12_000_000,
+    blockTimestamp: 1_700_000_000,
+    quotedAt: "2023-11-14T22:13:20.000Z",
+    expiresAt: "2023-11-14T22:13:35.000Z",
+    quoteId:
+      "0x1111111111111111111111111111111111111111111111111111111111111111",
+    poolState: {
+      sqrtPriceX96: "79228162514264337593543950336",
+      tick: 0,
+      liquidity: "1000000",
+    },
+  };
+  assert.deepEqual(parseLiveProtectedQuoteBody(quote), quote);
+  assert.equal(
+    parseLiveProtectedQuoteBody({
+      ...quote,
+      minAmountOut: "501",
+    }),
+    null,
+  );
+  assert.equal(
+    parseLiveProtectedQuoteBody({
+      ...quote,
+      amountSpecified: "1000000",
+    }),
+    null,
+  );
 });
 
 test("formats base units without rounding up a balance", () => {

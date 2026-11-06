@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Wallet } from "ethers";
+import { AbiCoder, Wallet, keccak256 } from "ethers";
 
 import {
   EXPECTED_AUTHORIZED_SIGNER,
@@ -62,7 +62,7 @@ test("local demo signing requires its explicit flag", () => {
 
 function makeBaseEnv() {
   const signerWallet = new Wallet("0x1111111111111111111111111111111111111111111111111111111111111111");
-  const verifierAddress = "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f";
+  const verifierAddress = "0xD3635b589dB0B4E215283274937C0b7600314A6d";
   const routerAddress = FIXTURE_ROUTER_ADDRESS;
 
   return {
@@ -153,22 +153,95 @@ test("MEVSHIELD_ROUTER fallback accepts the approved router", () => {
   assert.equal(config.routerAddress, EXPECTED_SEPOLIA_ROUTER);
 });
 
-test("ROUTER_ADDRESS keeps precedence over the legacy alias", () => {
+test("conflicting router aliases are rejected instead of silently choosing one", () => {
   const { signerWallet, env } = makeBaseEnv();
-  const config = loadBackendConfig({
-    ...env,
-    ROUTER_ADDRESS: EXPECTED_SEPOLIA_ROUTER,
-    MEVSHIELD_ROUTER: FIXTURE_ROUTER_ADDRESS,
-  }, signerWallet.address);
-
-  assert.equal(config.routerAddress, EXPECTED_SEPOLIA_ROUTER);
   assert.throws(
     () => loadBackendConfig({
       ...env,
       ROUTER_ADDRESS: FIXTURE_ROUTER_ADDRESS,
       MEVSHIELD_ROUTER: EXPECTED_SEPOLIA_ROUTER,
     }, signerWallet.address),
-    /does not match the approved Sepolia router/,
+    /router aliases must all use the same address/,
+  );
+});
+
+test("verified V2 deployment pins can replace legacy pins only as a complete matching set", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const hookAddress = "0x1111111111111111111111111111111111111111";
+  const poolKey = {
+    currency0: EXPECTED_PROTECTED_POOL.currency0,
+    currency1: EXPECTED_PROTECTED_POOL.currency1,
+    fee: 3000,
+    tickSpacing: 60,
+    hooks: hookAddress,
+  };
+  const poolId = keccak256(
+    AbiCoder.defaultAbiCoder().encode(
+      ["tuple(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)"],
+      [poolKey],
+    ),
+  );
+  const verifiedEnv: NodeJS.ProcessEnv = {
+    ...env,
+    MEVSHIELD_V2_DEPLOYMENT_VERIFIED: "true",
+    MEVSHIELD_SEPOLIA_SIGNER_ADDRESS: signerWallet.address,
+    MEVSHIELD_SEPOLIA_VERIFIER_ADDRESS: env.POLICY_VERIFIER_ADDRESS,
+    MEVSHIELD_SEPOLIA_ROUTER_ADDRESS: FIXTURE_ROUTER_ADDRESS,
+    MEVSHIELD_SEPOLIA_REGISTRY_ADDRESS:
+      "0x2222222222222222222222222222222222222222",
+    MEVSHIELD_SEPOLIA_AUTHORIZATION_ADDRESS:
+      "0x3333333333333333333333333333333333333333",
+    MEVSHIELD_SEPOLIA_HOOK_ADDRESS: hookAddress,
+    MEVSHIELD_SEPOLIA_POOL_ID: poolId,
+    ROUTER_ADDRESS: FIXTURE_ROUTER_ADDRESS,
+    HOOK_ADDRESS: hookAddress,
+    POLICY_REGISTRY_ADDRESS: "0x2222222222222222222222222222222222222222",
+    POLICY_AUTHORIZATION_ADDRESS: "0x3333333333333333333333333333333333333333",
+    PROTECTED_POOL_HOOK: hookAddress,
+    PROTECTED_POOL_ID: poolId,
+  };
+
+  const config = loadBackendConfig(verifiedEnv);
+  assert.equal(config.routerAddress, FIXTURE_ROUTER_ADDRESS);
+  assert.equal(config.protectedPool.hooks, hookAddress);
+  assert.equal(config.protectedPool.poolId, poolId);
+});
+
+test("verified V2 pins fail closed when any required deployment address is absent", () => {
+  const { env } = makeBaseEnv();
+  assert.throws(
+    () =>
+      loadBackendConfig({
+        ...env,
+        MEVSHIELD_V2_DEPLOYMENT_VERIFIED: "true",
+      }),
+    /MEVSHIELD_SEPOLIA_SIGNER_ADDRESS is required/,
+  );
+});
+
+test("verified V2 configuration rejects conflicting authorization aliases", () => {
+  const { signerWallet, env } = makeBaseEnv();
+  const valid = {
+    ...env,
+    MEVSHIELD_V2_DEPLOYMENT_VERIFIED: "true",
+    MEVSHIELD_SEPOLIA_SIGNER_ADDRESS: signerWallet.address,
+    MEVSHIELD_SEPOLIA_VERIFIER_ADDRESS: env.POLICY_VERIFIER_ADDRESS,
+    MEVSHIELD_SEPOLIA_ROUTER_ADDRESS: FIXTURE_ROUTER_ADDRESS,
+    MEVSHIELD_SEPOLIA_REGISTRY_ADDRESS:
+      "0x2222222222222222222222222222222222222222",
+    MEVSHIELD_SEPOLIA_AUTHORIZATION_ADDRESS:
+      "0x3333333333333333333333333333333333333333",
+    MEVSHIELD_SEPOLIA_HOOK_ADDRESS: EXPECTED_PROTECTED_POOL.hooks,
+    MEVSHIELD_SEPOLIA_POOL_ID: EXPECTED_PROTECTED_POOL.poolId,
+    ROUTER_ADDRESS: FIXTURE_ROUTER_ADDRESS,
+    POLICY_REGISTRY_ADDRESS: "0x2222222222222222222222222222222222222222",
+    POLICY_AUTHORIZATION_ADDRESS:
+      "0x3333333333333333333333333333333333333333",
+    POLICY_AUTHORIZATION: "0x4444444444444444444444444444444444444444",
+  };
+  assert.throws(
+    () => loadBackendConfig(valid),
+    /authorization aliases must all use the same address/,
   );
 });
 

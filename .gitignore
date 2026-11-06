@@ -15,6 +15,7 @@ backend/dist/
 # operator runbooks are committed.
 docs/*
 !docs/README.md
+!docs/PRODUCTION_READINESS_TRACKER.md
 !docs/architecture/
 !docs/services/
 !docs/api/

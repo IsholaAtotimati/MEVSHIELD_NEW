@@ -1,7 +1,11 @@
 import { AbiCoder, Wallet, getAddress, isAddress, keccak256 } from "ethers";
 
 import {
+  assertAddressAliasesAgree,
   firstConfigured,
+  resolveAuthorizationAddress,
+  resolveHookAddress,
+  resolveRegistryAddress,
   resolveRouterAddress,
   resolveVerifierAddress,
 } from "./env.js";
@@ -10,9 +14,9 @@ export const SEPOLIA_CHAIN_ID = 11155111;
 export const EXPECTED_AUTHORIZED_SIGNER =
   "0x016B78a30CE176EF0B90c122e8677e13aAB2A815";
 export const EXPECTED_SEPOLIA_VERIFIER =
-  "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f";
+  "0xD3635b589dB0B4E215283274937C0b7600314A6d";
 export const EXPECTED_SEPOLIA_ROUTER =
-  "0x633282608B2fc66cD7572f5eF58e804063aa150D";
+  "0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283";
 
 /**
  * Local Docker chain (anvil). Only reachable when `isLocalChainEnabled` is
@@ -39,8 +43,8 @@ export const EXPECTED_PROTECTED_POOL = {
   currency1: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
   fee: 3000,
   tickSpacing: 60,
-  hooks: "0xd15e4fdd391a68c2f1c385d1a819117a3ad40080",
-  poolId: "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602",
+  hooks: "0x15D8C5eb1b839A4Fd86989348c1371c10168c080",
+  poolId: "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235",
 } as const;
 
 export type ProtectedPoolConfig = {
@@ -59,6 +63,7 @@ export type ProtectedPoolValidationOptions = {
    * after the local chain gate has already passed.
    */
   allowUnpinnedPool?: boolean;
+  allowVerifiedSepoliaPool?: boolean;
 };
 
 const PROTECTED_POOL_KEY_ABI =
@@ -98,6 +103,8 @@ export function validateProtectedPoolConfig(
   options: ProtectedPoolValidationOptions = {},
 ): ProtectedPoolConfig {
   const allowUnpinnedPool = options.allowUnpinnedPool === true;
+  const allowVerifiedSepoliaPool =
+    options.allowVerifiedSepoliaPool === true && chainId === SEPOLIA_CHAIN_ID;
   const currency0 = configuredAddress(env.PROTECTED_POOL_CURRENCY0, "PROTECTED_POOL_CURRENCY0");
   const currency1 = configuredAddress(env.PROTECTED_POOL_CURRENCY1, "PROTECTED_POOL_CURRENCY1");
   const fee = configuredInteger(env.PROTECTED_POOL_FEE, "PROTECTED_POOL_FEE");
@@ -143,8 +150,9 @@ export function validateProtectedPoolConfig(
     currency1.toLowerCase() === EXPECTED_PROTECTED_POOL.currency1.toLowerCase() &&
     fee === EXPECTED_PROTECTED_POOL.fee &&
     tickSpacing === EXPECTED_PROTECTED_POOL.tickSpacing &&
-    hooks.toLowerCase() === EXPECTED_PROTECTED_POOL.hooks.toLowerCase() &&
-    derivedPoolId.toLowerCase() === EXPECTED_PROTECTED_POOL.poolId.toLowerCase();
+    (allowVerifiedSepoliaPool ||
+      (hooks.toLowerCase() === EXPECTED_PROTECTED_POOL.hooks.toLowerCase() &&
+        derivedPoolId.toLowerCase() === EXPECTED_PROTECTED_POOL.poolId.toLowerCase()));
   if (!matchesExpected) {
     throw new Error("Protected-pool configuration does not match the approved Sepolia WETH/USDC pool.");
   }
@@ -233,6 +241,23 @@ export function resolveChainExpectations(
       isLocal: true,
     };
   }
+  if (env.MEVSHIELD_V2_DEPLOYMENT_VERIFIED === "true") {
+    return {
+      signer: configuredAddress(
+        env.MEVSHIELD_SEPOLIA_SIGNER_ADDRESS,
+        "MEVSHIELD_SEPOLIA_SIGNER_ADDRESS",
+      ),
+      verifier: configuredAddress(
+        env.MEVSHIELD_SEPOLIA_VERIFIER_ADDRESS,
+        "MEVSHIELD_SEPOLIA_VERIFIER_ADDRESS",
+      ),
+      router: configuredAddress(
+        env.MEVSHIELD_SEPOLIA_ROUTER_ADDRESS,
+        "MEVSHIELD_SEPOLIA_ROUTER_ADDRESS",
+      ),
+      isLocal: false,
+    };
+  }
   return {
     signer: EXPECTED_AUTHORIZED_SIGNER,
     verifier: EXPECTED_SEPOLIA_VERIFIER,
@@ -253,13 +278,31 @@ export function loadBackendConfig(
 ) {
   const requireSigner = options.requireSigner ?? true;
   const localChain = isLocalChainEnabled(env);
+  assertAddressAliasesAgree(env, "router", ["ROUTER_ADDRESS", "MEVSHIELD_ROUTER"]);
+  assertAddressAliasesAgree(env, "hook", ["HOOK_ADDRESS", "MEVSHIELD_HOOK_ADDRESS"]);
+  assertAddressAliasesAgree(env, "verifier", [
+    "POLICY_VERIFIER_ADDRESS",
+    "VERIFIER_ADDRESS",
+    "POLICY_VERIFIER",
+  ]);
+  assertAddressAliasesAgree(env, "registry", [
+    "POLICY_REGISTRY_ADDRESS",
+    "POLICY_REGISTRY",
+  ]);
   const chainExpectations = resolveChainExpectations(env);
+  const verifiedSepolia =
+    !isLocalChainEnabled(env) &&
+    env.MEVSHIELD_V2_DEPLOYMENT_VERIFIED === "true";
   const effectiveSigner = localChain
     ? EXPECTED_LOCAL_SIGNER
-    : expectedSignerAddress;
+    : verifiedSepolia
+      ? chainExpectations.signer
+      : expectedSignerAddress;
   const effectiveRouter = localChain
     ? EXPECTED_LOCAL_ROUTER
-    : expectedRouterAddress;
+    : verifiedSepolia
+      ? chainExpectations.router
+      : expectedRouterAddress;
   const chainIdValue = Number(firstConfigured(env.CHAIN_ID));
 
   if (Number.isNaN(chainIdValue)) {
@@ -284,9 +327,21 @@ export function loadBackendConfig(
 
   const protectedPool = validateProtectedPoolConfig(env, chainIdValue, {
     allowUnpinnedPool: localChain,
+    allowVerifiedSepoliaPool:
+      !localChain && env.MEVSHIELD_V2_DEPLOYMENT_VERIFIED === "true",
   });
 
   const verifierAddress = resolveVerifierAddress(env);
+  const registryAddress = resolveRegistryAddress(env);
+  const authorizationAddress = resolveAuthorizationAddress(env);
+  const hookAddress = resolveHookAddress(env);
+  if (
+    hookAddress &&
+    isAddress(hookAddress) &&
+    getAddress(hookAddress).toLowerCase() !== protectedPool.hooks.toLowerCase()
+  ) {
+    throw new Error("Configured hook address does not match the protected-pool key.");
+  }
 
   const verifierExpectation = chainExpectations.verifier;
 
@@ -300,6 +355,56 @@ export function loadBackendConfig(
     throw new Error(
       `Invalid verifier configuration. Expected ${localChain ? "local" : "Sepolia"} PolicyVerifier ${verifierExpectation}.`,
     );
+  }
+
+  if (!localChain && env.MEVSHIELD_V2_DEPLOYMENT_VERIFIED === "true") {
+    assertAddressAliasesAgree(env, "authorization", [
+      "POLICY_AUTHORIZATION_ADDRESS",
+      "POLICY_AUTHORIZATION",
+    ]);
+    const expectedPoolId = requiredValue(
+      env.MEVSHIELD_SEPOLIA_POOL_ID,
+      "MEVSHIELD_SEPOLIA_POOL_ID",
+    );
+    if (
+      !/^0x[0-9a-fA-F]{64}$/.test(expectedPoolId) ||
+      expectedPoolId.toLowerCase() !== protectedPool.poolId.toLowerCase()
+    ) {
+      throw new Error(
+        "Configured protected pool does not match MEVSHIELD_SEPOLIA_POOL_ID.",
+      );
+    }
+
+    const expectedHook = configuredAddress(
+      env.MEVSHIELD_SEPOLIA_HOOK_ADDRESS,
+      "MEVSHIELD_SEPOLIA_HOOK_ADDRESS",
+    );
+    if (protectedPool.hooks.toLowerCase() !== expectedHook.toLowerCase()) {
+      throw new Error("Protected-pool hook does not match the verified Sepolia hook pin.");
+    }
+    if (!hookAddress || getAddress(hookAddress) !== expectedHook) {
+      throw new Error("HOOK_ADDRESS does not match the verified Sepolia hook pin.");
+    }
+
+    const expectedRegistry = configuredAddress(
+      env.MEVSHIELD_SEPOLIA_REGISTRY_ADDRESS,
+      "MEVSHIELD_SEPOLIA_REGISTRY_ADDRESS",
+    );
+    const expectedAuthorization = configuredAddress(
+      env.MEVSHIELD_SEPOLIA_AUTHORIZATION_ADDRESS,
+      "MEVSHIELD_SEPOLIA_AUTHORIZATION_ADDRESS",
+    );
+    if (!registryAddress || getAddress(registryAddress) !== expectedRegistry) {
+      throw new Error("Policy registry does not match the verified Sepolia registry pin.");
+    }
+    if (
+      !authorizationAddress ||
+      getAddress(authorizationAddress) !== expectedAuthorization
+    ) {
+      throw new Error(
+        "Policy authorization does not match the verified Sepolia authorization pin.",
+      );
+    }
   }
 
   let signerWallet: Wallet | undefined;

@@ -48,6 +48,16 @@ export function resolveRegistryAddress(
   return firstConfigured(env.POLICY_REGISTRY_ADDRESS, env.POLICY_REGISTRY);
 }
 
+/** `POLICY_AUTHORIZATION_ADDRESS`, falling back to `POLICY_AUTHORIZATION`. */
+export function resolveAuthorizationAddress(
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  return firstConfigured(
+    env.POLICY_AUTHORIZATION_ADDRESS,
+    env.POLICY_AUTHORIZATION,
+  );
+}
+
 /** `HOOK_ADDRESS`, falling back to the legacy `MEVSHIELD_HOOK_ADDRESS`. */
 export function resolveHookAddress(
   env: NodeJS.ProcessEnv,
@@ -63,4 +73,29 @@ export function resolveRouterAddress(
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   return firstConfigured(env.ROUTER_ADDRESS, env.MEVSHIELD_ROUTER);
+}
+
+/**
+ * Reject conflicting configured aliases instead of silently selecting one.
+ * Address casing is not significant; other input validation remains the
+ * responsibility of the configuration consumer.
+ */
+export function assertAddressAliasesAgree(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  aliases: string[],
+): void {
+  const configured = aliases
+    .map((alias) => ({ alias, value: env[alias]?.trim() }))
+    .filter((entry): entry is { alias: string; value: string } =>
+      Boolean(entry.value),
+    );
+  const distinct = new Set(
+    configured.map(({ value }) => value.toLowerCase()),
+  );
+  if (distinct.size > 1) {
+    throw new Error(
+      `${name} aliases must all use the same address: ${configured.map(({ alias }) => alias).join(", ")}.`,
+    );
+  }
 }

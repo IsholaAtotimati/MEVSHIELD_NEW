@@ -25,8 +25,10 @@ import {PolicyVerifier} from "./PolicyVerifier.sol";
 contract MEVShieldHook is IHooks {
     IPoolManager public immutable poolManager;
     PolicyAuthorization public immutable authorization;
+    address public immutable trustedRouter;
 
     error Unauthorized();
+    error UnauthorizedRouter();
 
     modifier onlyPoolManager() {
         if (msg.sender != address(poolManager)) {
@@ -68,9 +70,12 @@ contract MEVShieldHook is IHooks {
     /// @notice Uniswap v4 beforeSwap execution boundary.
     ///
     /// Policy is passed through hookData for the MVP.
-    constructor(IPoolManager poolManager_, PolicyAuthorization authorization_) {
+    constructor(IPoolManager poolManager_, PolicyAuthorization authorization_, address trustedRouter_) {
+        if (trustedRouter_ == address(0)) revert UnauthorizedRouter();
+
         poolManager = poolManager_;
         authorization = authorization_;
+        trustedRouter = trustedRouter_;
     }
 
     function beforeSwap(
@@ -79,8 +84,8 @@ contract MEVShieldHook is IHooks {
         IPoolManager.SwapParams calldata params,
         bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
-        if (sender == address(0)) {
-            revert InvalidTrader();
+        if (sender != trustedRouter) {
+            revert UnauthorizedRouter();
         }
 
         bytes32 actualPoolId = PoolId.unwrap(key.toId());
@@ -96,8 +101,8 @@ contract MEVShieldHook is IHooks {
             revert PoolMismatch();
         }
 
-        if (policy.trader != sender) {
-            revert TraderMismatch();
+        if (policy.trader == address(0)) {
+            revert InvalidTrader();
         }
 
         if (
@@ -149,7 +154,7 @@ contract MEVShieldHook is IHooks {
             signature
         );
 
-        emit SwapPolicyEnforced(actualPoolId, sender, policy.nonce, policy.maxLoss, policy.maxFee);
+        emit SwapPolicyEnforced(actualPoolId, policy.trader, policy.nonce, policy.maxLoss, policy.maxFee);
 
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }

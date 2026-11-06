@@ -111,7 +111,8 @@ function main() {
   );
 
   const out = {
-    router: "0x633282608B2fc66cD7572f5eF58e804063aa150D",
+    // The default input is a retired historical artifact, not a runtime target.
+    router: "historical-input",
     deployedHexFile: deployedPath,
     deployedByteLen: deployedNorm.length / 2,
     selectorsOnDeployed: selectorReport(deployedNorm),

@@ -24,7 +24,7 @@ export function policyResponseMatchesExpected(
     return "Backend policy pool ID did not match the verified protected pool.";
   }
   if (p.trader.toLowerCase() !== expected.trader.toLowerCase()) {
-    return "Backend policy trader did not match the router address.";
+    return "Backend policy trader did not match the executing wallet.";
   }
   if (p.nonce !== expected.nonce) {
     return "Backend policy nonce did not match the request.";

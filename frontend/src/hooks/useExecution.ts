@@ -13,6 +13,7 @@ import { erc20Abi, mevShieldRouterAbi } from "../lib/abis";
 import {
   calculateMinimumOutput,
   DEMO_MIN_AMOUNT_OUT,
+  hasSufficientQuoteWindow,
   isFreshDemoPoolReadiness,
   type ProtectedQuote,
   type SwapReadiness,
@@ -78,7 +79,8 @@ export function useExecution(args: UseExecutionArgs) {
     }
     if (!swapReadiness.canExecute || zeroForOne === null) {
       setActionStatus(
-        "Protected execution is unavailable until the protected quote, policy bounds, backend configuration, and on-chain checks are verified.",
+        swapReadiness.executionReasons[0] ??
+          "Protected execution checks are not complete.",
       );
       return;
     }
@@ -89,7 +91,7 @@ export function useExecution(args: UseExecutionArgs) {
 
     // Narrowed once, after the guard above, so the rest of the function uses
     // non-null pool identity without a cast.
-    const { poolId, poolKey, token0, token1 } = SWAP_POOL_CONFIGURATION;
+    const { poolId, poolKey } = SWAP_POOL_CONFIGURATION;
 
     const requestId = policy.requestId || policyRequestId;
     const amountBaseUnits = inputAmountBaseUnits;
@@ -99,7 +101,7 @@ export function useExecution(args: UseExecutionArgs) {
 
     logFrontend("protected_swap_execution_started", {
       requestId,
-      trader: CONTRACTS.mevShieldRouter,
+      trader: policy.policy.trader,
       amount: amountSpecified?.toString(),
       policyHash: policy.policyId,
     });
@@ -116,6 +118,12 @@ export function useExecution(args: UseExecutionArgs) {
       await ensureSepolia();
       setAccount(payer);
 
+      if (BigInt(policy.policy.expiry) <= BigInt(Math.floor(Date.now() / 1000))) {
+        throw new Error(
+          "Policy expired. Create and register a new policy before executing.",
+        );
+      }
+
       if (
         amountBaseUnits === null ||
         amountBaseUnits <= 0n ||
@@ -131,14 +139,20 @@ export function useExecution(args: UseExecutionArgs) {
           ? calculateMinimumOutput(
               protectedQuote.amountOutBaseUnits,
               slippageBps,
-            )
+            ) === protectedQuote.minAmountOutBaseUnits
+            ? protectedQuote.minAmountOutBaseUnits
+            : null
           : null;
       if (
         policy.policy.poolId !== poolId ||
         policy.policy.trader.toLowerCase() !==
-          CONTRACTS.mevShieldRouter.toLowerCase() ||
+          payer.toLowerCase() ||
         policy.policy.amountSpecified !== amountSpecified.toString() ||
         policy.policy.zeroForOne !== zeroForOne ||
+        (protectedQuote.status === "available" &&
+          (protectedQuote.zeroForOne !== zeroForOne ||
+            policy.policy.sqrtPriceLimitX96 !==
+              protectedQuote.sqrtPriceLimitX96)) ||
         requiredMinimumOutput === null ||
         policy.policy.minAmountOut !== requiredMinimumOutput.toString() ||
         (!SEPOLIA_DEMO_MODE &&
@@ -155,8 +169,10 @@ export function useExecution(args: UseExecutionArgs) {
       }
 
       const amountIn = amountBaseUnits;
-      const inputTokenAddress =
-        inputToken === "ETH" ? token0 : token1;
+      const inputTokenAddress = SWAP_TOKENS[inputToken].address;
+      if (inputTokenAddress === null) {
+        throw new Error("The selected input token is not configured for this pool.");
+      }
 
       const inputBalance = await publicClient.readContract({
         address: inputTokenAddress,
@@ -179,27 +195,24 @@ export function useExecution(args: UseExecutionArgs) {
       });
 
       if (allowance < amountIn) {
-        setActionStatus(
-          "Approve the input token in your wallet; you pay the approval gas.",
+        throw new Error(
+          "Input-token approval is required before policy creation. Refresh the quote and create a new policy after approving.",
         );
-        const approvalHash = await walletClient.writeContract({
-          address: inputTokenAddress,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [CONTRACTS.mevShieldRouter, amountIn],
-          account: payer,
-        });
-        logFrontend("transaction_submitted", {
-          requestId,
-          txHash: approvalHash,
-          transactionType: "token_approval",
-        });
-        const approvalReceipt = await publicClient.waitForTransactionReceipt({
-          hash: approvalHash,
-        });
-        if (approvalReceipt.status !== "success") {
-          throw new Error("Input-token approval transaction failed.");
-        }
+      }
+      if (
+        !SEPOLIA_DEMO_MODE &&
+        !hasSufficientQuoteWindow(
+          protectedQuote,
+          Date.now(),
+          undefined,
+          amountIn,
+          poolId,
+          zeroForOne,
+        )
+      ) {
+        throw new Error(
+          "The live quote expired before execution. Refresh the quote and create a new policy.",
+        );
       }
 
       const hookData = encodeAbiParameters(

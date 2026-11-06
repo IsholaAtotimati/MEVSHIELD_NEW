@@ -17,31 +17,22 @@ import {PolicyAuthorization} from "../src/PolicyAuthorization.sol";
 import {PolicyRegistry} from "../src/PolicyRegistry.sol";
 import {PolicyVerifier} from "../src/PolicyVerifier.sol";
 
-contract SepoliaForkDeploymentAExecutionTest is Test {
+contract SepoliaForkDeploymentBExecutionTest is Test {
     using PoolIdLibrary for PoolKey;
 
     uint256 private constant SEPOLIA_CHAIN_ID = 11155111;
     uint256 private constant WETH_INPUT = 1e15;
 
-    address private constant POOL_MANAGER =
-        0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address private constant HOOK =
-        0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
-    address private constant ROUTER =
-        0x633282608B2fc66cD7572f5eF58e804063aa150D;
-    address private constant USDC =
-        0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
-    address private constant WETH =
-        0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address private constant EXPECTED_VERIFIER =
-        0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f;
-    address private constant EXPECTED_AUTH =
-        0xefC9bc21f1ab3564232a3216f0e45d5caE3Bd7c5;
-    address private constant EXPECTED_REGISTRY =
-        0xB2897da1CfC0c73C3983221a87C27586D1cE1c9E;
+    address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+    address private constant HOOK = 0x15D8C5eb1b839A4Fd86989348c1371c10168c080;
+    address private constant ROUTER = 0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283;
+    address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+    address private constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
+    address private constant EXPECTED_VERIFIER = 0xD3635b589dB0B4E215283274937C0b7600314A6d;
+    address private constant EXPECTED_AUTH = 0xEDC98B44349EDF0D0b71cBc5D4523352ffB8c821;
+    address private constant EXPECTED_REGISTRY = 0x3b1b05954b226633e87cC875593E5E8FB998eFBC;
 
-    bytes32 private constant EXPECTED_POOL_ID =
-        0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    bytes32 private constant EXPECTED_POOL_ID = 0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235;
 
     IPoolManager private manager;
     MEVShieldHook private hook;
@@ -50,16 +41,15 @@ contract SepoliaForkDeploymentAExecutionTest is Test {
     PolicyRegistry private registry;
     PolicyVerifier private verifier;
     PoolKey private poolKey;
-    uint256 private signerKey;
+    // Disposable key used only inside the local Sepolia fork.
+    uint256 private constant FORK_SIGNER_KEY = 0xA11CE;
 
     function setUp() public {
-        if (!vm.envOr("RUN_SEPOLIA_FORK_DEPLOYMENT_A_EXECUTION", false)) {
+        if (!vm.envOr("RUN_SEPOLIA_FORK_DEPLOYMENT_B_EXECUTION", false)) {
             vm.skip(true);
         }
 
-        uint256 pinnedBlock = vm.envOr(
-            "SEPOLIA_FORK_BLOCK_NUMBER", uint256(0)
-        );
+        uint256 pinnedBlock = vm.envOr("SEPOLIA_FORK_BLOCK_NUMBER", uint256(0));
 
         require(pinnedBlock != 0, "pinned block required");
         require(block.number == pinnedBlock, "wrong fork block");
@@ -89,22 +79,31 @@ contract SepoliaForkDeploymentAExecutionTest is Test {
             hooks: IHooks(HOOK)
         });
 
-        require(
-            PoolId.unwrap(poolKey.toId()) == EXPECTED_POOL_ID,
-            "pool ID mismatch"
-        );
+        require(PoolId.unwrap(poolKey.toId()) == EXPECTED_POOL_ID, "pool ID mismatch");
 
-        signerKey = vm.envUint("SIGNER_PRIVATE_KEY");
-        require(
-            vm.addr(signerKey) == verifier.authorizedSigner(),
-            "configured key is not authorized signer"
-        );
+        // Verify the original Deployment B signer before changing fork state.
+        address liveSigner = verifier.authorizedSigner();
+        address expectedLiveSigner = address(uint160(0x016B78a30CE176EF0B90c122e8677e13aAB2A815));
+
+        require(liveSigner == expectedLiveSigner, "unexpected live authorized signer");
+
+        // Confirm storage slot 3 matches the deployed getter.
+        bytes32 signerSlot = bytes32(uint256(3));
+        bytes32 originalSlotValue = vm.load(address(verifier), signerSlot);
+
+        require(originalSlotValue == bytes32(uint256(uint160(liveSigner))), "authorizedSigner storage slot mismatch");
+
+        // Change signer only in the disposable fork's local state.
+        address forkSigner = vm.addr(FORK_SIGNER_KEY);
+        require(forkSigner != liveSigner, "fork signer must be different");
+
+        vm.store(address(verifier), signerSlot, bytes32(uint256(uint160(forkSigner))));
+
+        require(verifier.authorizedSigner() == forkSigner, "fork signer override failed");
     }
 
     function test_deployedPolicyCanAuthorizeProtectedSwap() public {
-        uint256 nonce = uint256(
-            keccak256(abi.encode(block.number, address(this), uint256(1)))
-        );
+        uint256 nonce = uint256(keccak256(abi.encode(block.number, address(this), uint256(1))));
 
         MEVShieldHook.Policy memory policy = _newPolicy(nonce, 1);
         bytes memory signature = _sign(policy);
@@ -112,24 +111,16 @@ contract SepoliaForkDeploymentAExecutionTest is Test {
         authorization.registerPolicy(_toVerifierPolicy(policy), signature);
 
         deal(WETH, address(this), WETH_INPUT);
-        require(
-            IERC20Minimal(WETH).approve(ROUTER, WETH_INPUT),
-            "WETH approval failed"
-        );
+        require(IERC20Minimal(WETH).approve(ROUTER, WETH_INPUT), "WETH approval failed");
 
         uint256 usdcBefore = IERC20Minimal(USDC).balanceOf(address(this));
 
         (uint160 priceLimit,,,) = _poolPriceAndLimit(false);
 
         // The policy was built using the same price limit as the swap.
-        require(
-            policy.sqrtPriceLimitX96 == priceLimit,
-            "policy price limit mismatch"
-        );
+        require(policy.sqrtPriceLimitX96 == priceLimit, "policy price limit mismatch");
 
-        bytes memory hookData = abi.encode(
-            policy, signature, uint256(0), uint256(0)
-        );
+        bytes memory hookData = abi.encode(policy, signature, uint256(0), uint256(0));
 
         router.executeSwap(
             poolKey,
@@ -143,50 +134,32 @@ contract SepoliaForkDeploymentAExecutionTest is Test {
         );
 
         uint256 usdcAfter = IERC20Minimal(USDC).balanceOf(address(this));
+        emit log_named_uint("Actual USDC output (6 decimals)", usdcAfter - usdcBefore);
 
         assertGt(usdcAfter, usdcBefore, "swap produced no USDC");
-        assertTrue(
-            registry.isConsumed(policy.trader, policy.nonce),
-            "deployed policy was not consumed"
-        );
+        assertTrue(registry.isConsumed(policy.trader, policy.nonce), "deployed policy was not consumed");
     }
 
-
     function test_impossibleMinimumOutputRevertsAndRollsBack() public {
-        uint256 nonce = uint256(
-            keccak256(abi.encode(block.number, address(this), uint256(2)))
-        );
+        uint256 nonce = uint256(keccak256(abi.encode(block.number, address(this), uint256(2))));
 
         uint256 impossibleMinOut = type(uint128).max;
 
-        MEVShieldHook.Policy memory policy = _newPolicy(
-            nonce,
-            impossibleMinOut
-        );
+        MEVShieldHook.Policy memory policy = _newPolicy(nonce, impossibleMinOut);
         bytes memory signature = _sign(policy);
 
         authorization.registerPolicy(_toVerifierPolicy(policy), signature);
 
         deal(WETH, address(this), WETH_INPUT);
-        require(
-            IERC20Minimal(WETH).approve(ROUTER, WETH_INPUT),
-            "WETH approval failed"
-        );
+        require(IERC20Minimal(WETH).approve(ROUTER, WETH_INPUT), "WETH approval failed");
 
         uint256 wethBefore = IERC20Minimal(WETH).balanceOf(address(this));
         uint256 usdcBefore = IERC20Minimal(USDC).balanceOf(address(this));
 
-        bytes memory hookData = abi.encode(
-            policy,
-            signature,
-            uint256(0),
-            uint256(0)
-        );
+        bytes memory hookData = abi.encode(policy, signature, uint256(0), uint256(0));
 
         // Verify that the swap fails; balance and nonce checks follow.
-        vm.expectPartialRevert(
-            MEVShieldRouter.MinimumOutputNotMet.selector
-        );
+        vm.expectPartialRevert(MEVShieldRouter.MinimumOutputNotMet.selector);
 
         router.executeSwap(
             poolKey,
@@ -199,27 +172,12 @@ contract SepoliaForkDeploymentAExecutionTest is Test {
             address(this)
         );
 
-        assertEq(
-            IERC20Minimal(WETH).balanceOf(address(this)),
-            wethBefore,
-            "WETH balance changed after revert"
-        );
-        assertEq(
-            IERC20Minimal(USDC).balanceOf(address(this)),
-            usdcBefore,
-            "USDC balance changed after revert"
-        );
-        assertFalse(
-            registry.isConsumed(policy.trader, policy.nonce),
-            "policy consumed despite reverted transaction"
-        );
+        assertEq(IERC20Minimal(WETH).balanceOf(address(this)), wethBefore, "WETH balance changed after revert");
+        assertEq(IERC20Minimal(USDC).balanceOf(address(this)), usdcBefore, "USDC balance changed after revert");
+        assertFalse(registry.isConsumed(policy.trader, policy.nonce), "policy consumed despite reverted transaction");
     }
 
-    function _newPolicy(uint256 nonce, uint256 minAmountOut)
-        private
-        view
-        returns (MEVShieldHook.Policy memory policy)
-    {
+    function _newPolicy(uint256 nonce, uint256 minAmountOut) private view returns (MEVShieldHook.Policy memory policy) {
         (uint160 priceLimit,,,) = _poolPriceAndLimit(false);
 
         policy = MEVShieldHook.Policy({
@@ -241,32 +199,20 @@ contract SepoliaForkDeploymentAExecutionTest is Test {
         view
         returns (uint160 limit, int24 currentTick, uint24 protocolFee, uint24 lpFee)
     {
+        (, currentTick, protocolFee, lpFee) = StateLibrary.getSlot0(manager, PoolId.wrap(EXPECTED_POOL_ID));
 
-        (, currentTick, protocolFee, lpFee) =
-            StateLibrary.getSlot0(manager, PoolId.wrap(EXPECTED_POOL_ID));
-
-        int24 limitTick = zeroForOne
-            ? currentTick - 500
-            : currentTick + 500;
+        int24 limitTick = zeroForOne ? currentTick - 500 : currentTick + 500;
 
         limit = TickMath.getSqrtPriceAtTick(limitTick);
     }
 
-    function _sign(MEVShieldHook.Policy memory policy)
-        private
-        view
-        returns (bytes memory)
-    {
+    function _sign(MEVShieldHook.Policy memory policy) private view returns (bytes memory) {
         bytes32 digest = verifier.hashPolicy(_toVerifierPolicy(policy));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(FORK_SIGNER_KEY, digest);
         return abi.encodePacked(r, s, v);
     }
 
-    function _toVerifierPolicy(MEVShieldHook.Policy memory policy)
-        private
-        pure
-        returns (PolicyVerifier.Policy memory)
-    {
+    function _toVerifierPolicy(MEVShieldHook.Policy memory policy) private pure returns (PolicyVerifier.Policy memory) {
         return PolicyVerifier.Policy({
             poolId: policy.poolId,
             trader: policy.trader,

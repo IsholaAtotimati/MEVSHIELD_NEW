@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-
 import {
   DEMO_ESTIMATE_MODE,
   READ_ONLY_DEMO_MODE,
@@ -10,7 +9,7 @@ import {
   SWAP_POOL_ID,
   SWAP_TOKENS,
 } from "../config/swapPool";
-import { TOKEN_NETWORK_LABEL } from "../config/chain";
+import { CHAIN_ID, TOKEN_NETWORK_LABEL } from "../config/chain";
 import Button from "../components/Button";
 import Delta from "../components/Delta";
 import ExplorerLink from "../components/ExplorerLink";
@@ -25,7 +24,6 @@ import SwapInputs from "../components/SwapInputs";
 import ToggleRow from "../components/ToggleRow";
 import { useTrade } from "../context/TradeContext";
 import {
-  calculateMinimumOutput,
   DEMO_MIN_AMOUNT_OUT,
   DEMO_USDC_PER_WETH,
 } from "../lib/protectedQuote";
@@ -36,6 +34,7 @@ import {
 } from "../lib/format";
 import { resolveShieldPhase } from "../lib/shieldReport";
 import { EXPLORER_NAME, explorerTxUrl } from "../lib/explorer";
+import { resolveTradeActionReadiness } from "../lib/tradeActionReadiness";
 
 const SLIPPAGE_PRESETS = [
   { label: "0.1%", bps: 10 },
@@ -79,16 +78,36 @@ export default function TradePage() {
       ? "sign"
       : "check";
 
-  const primaryDisabled =
-    inputAmountBaseUnits === null ||
-    inputAmountBaseUnits <= 0n ||
-    zeroForOne === null ||
-    policy.isPreviewingRisk ||
-    policy.isCreatingPolicy ||
-    execution.isExecuting ||
-    (READ_ONLY_DEMO_MODE && primaryStep === "sign") ||
-    (primaryStep === "sign" && !swapReadiness.canCheckRisk) ||
-    (primaryStep === "check" && policy.isPreviewingRisk);
+  const actionReadiness = resolveTradeActionReadiness({
+    primaryStep,
+    inputAmountValid:
+      inputAmountBaseUnits !== null && inputAmountBaseUnits > 0n,
+    directionValid: zeroForOne !== null,
+    isBusy:
+      policy.isPreviewingRisk ||
+      policy.isCreatingPolicy ||
+      execution.isExecuting,
+    readOnlyDemo: READ_ONLY_DEMO_MODE,
+    demoMode: DEMO_ESTIMATE_MODE,
+    canCheckRisk: swapReadiness.canCheckRisk,
+    readinessReasons: swapReadiness.reasons,
+    backendHealthState: trade.backend.healthState,
+    backendHealthError: trade.backend.healthError,
+    backendPolicySigningEnabled:
+      trade.backend.health?.policySigningEnabled === true,
+    backendChainId: trade.backend.health?.chainId ?? null,
+    backendDemoMode: trade.backend.health?.localDemoMode === true,
+    walletConnected: trade.wallet.account !== null,
+    walletChainId: trade.wallet.chainId,
+    requiredChainId: CHAIN_ID,
+    policyRegistered: Boolean(policy.policy?.registered),
+    canExecute: swapReadiness.canExecute,
+    executionReasons: swapReadiness.executionReasons,
+  });
+  const signingDiagnostics = [
+    ...new Set([...swapReadiness.reasons, ...actionReadiness.primaryReasons]),
+  ];
+  const executionDiagnostics = actionReadiness.executionReasons;
 
   async function onPrimaryClick() {
     if (primaryStep === "check") {
@@ -101,8 +120,18 @@ export default function TradePage() {
     }
   }
 
-  const checklist = swapReadiness.reasons;
-  const executionChecklist = swapReadiness.executionReasons;
+  async function switchWalletToSepolia() {
+    try {
+      await trade.wallet.ensureSepolia();
+      policy.setActionStatus("Wallet is connected to Sepolia.");
+    } catch (error) {
+      policy.setActionStatus(
+        error instanceof Error
+          ? error.message
+          : "Could not switch wallet to Sepolia.",
+      );
+    }
+  }
   const lifecycleQuoted = quoteIsFresh;
   const lifecycleRegistered = Boolean(policy.policy?.registered);
   const lifecycleExecuted = Boolean(execution.execution);
@@ -121,15 +150,7 @@ export default function TradePage() {
     : DEMO_ESTIMATE_MODE
       ? `${formatBaseUnits(DEMO_MIN_AMOUNT_OUT, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol} (demo floor)`
     : quoteIsFresh && quote.protectedQuote.status === "available"
-      ? (() => {
-          const minimum = calculateMinimumOutput(
-            quote.protectedQuote.amountOutBaseUnits,
-            slippageBps,
-          );
-          return minimum === null
-            ? "invalid"
-            : `${formatBaseUnits(minimum, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol}`;
-        })()
+      ? `${formatBaseUnits(quote.protectedQuote.minAmountOutBaseUnits, SWAP_TOKENS[outputToken].decimals)} ${SWAP_TOKENS[outputToken].poolSymbol}`
       : "unavailable until a fresh quote exists";
 
   const quoteAge =
@@ -140,7 +161,7 @@ export default function TradePage() {
   const priceImpact = DEMO_ESTIMATE_MODE
     ? "estimate only (demo)"
     : quoteIsFresh && quote.protectedQuote.status === "available"
-      ? "from protected pool quote"
+      ? `${(quote.protectedQuote.priceImpactBps / 100).toFixed(2)}% · block ${quote.protectedQuote.blockNumber}`
       : "unavailable";
 
   return (
@@ -209,9 +230,25 @@ export default function TradePage() {
             ))}
             <Button
               variant="chip"
-              onClick={() => void quote.inspectProtectedPool()}
+              disabled={quote.isRefreshingQuote}
+              onClick={() => {
+                if (
+                  inputAmountBaseUnits !== null &&
+                  inputAmountBaseUnits > 0n &&
+                  zeroForOne !== null
+                ) {
+                  void quote.refreshLiveQuote(
+                    inputAmountBaseUnits,
+                    zeroForOne,
+                    slippageBps,
+                    true,
+                  );
+                } else {
+                  void quote.inspectProtectedPool();
+                }
+              }}
             >
-              Refresh quote
+              {quote.isRefreshingQuote ? "Refreshing quote..." : "Refresh live quote"}
             </Button>
           </div>
           {!SEPOLIA_DEMO_MODE && (
@@ -255,35 +292,42 @@ export default function TradePage() {
         )}
 
         <div className="actions">
-          <Button
-            variant="primary"
-            wide
-            disabled={primaryDisabled}
-            onClick={() => void onPrimaryClick()}
-          >
-            {primaryStep === "check"
-              ? policy.isPreviewingRisk
-                ? READ_ONLY_DEMO_MODE
-                  ? "Calculating demo preview..."
-                  : "Checking protection..."
-                : READ_ONLY_DEMO_MODE
-                  ? "Check demo estimate"
-                  : "Check protection"
-              : policy.isCreatingPolicy
-                ? "Signing policy..."
-                : READ_ONLY_DEMO_MODE
-                  ? "Demo preview complete"
-                  : "Sign policy and swap"}
-          </Button>
+          {primaryStep !== "done" && (
+            <Button
+              variant="primary"
+              wide
+              disabled={actionReadiness.primaryDisabled}
+              onClick={() => void onPrimaryClick()}
+            >
+              {primaryStep === "check"
+                ? policy.isPreviewingRisk
+                  ? READ_ONLY_DEMO_MODE
+                    ? "Calculating demo preview..."
+                    : "Checking protection..."
+                  : READ_ONLY_DEMO_MODE
+                    ? "Check demo estimate"
+                    : "Check protection"
+                : policy.isCreatingPolicy
+                  ? "Signing policy..."
+                  : "Sign and register policy"}
+            </Button>
+          )}
+          {trade.wallet.account !== null &&
+            trade.wallet.chainId !== CHAIN_ID && (
+              <Button
+                variant="ghost"
+                wide
+                disabled={policy.isCreatingPolicy || execution.isExecuting}
+                onClick={() => void switchWalletToSepolia()}
+              >
+                Switch wallet to Sepolia
+              </Button>
+            )}
           {policy.policy?.registered && !READ_ONLY_DEMO_MODE && (
             <Button
               variant="primary"
               wide
-              disabled={
-                !swapReadiness.canExecute ||
-                execution.isExecuting ||
-                policy.isCreatingPolicy
-              }
+              disabled={actionReadiness.executionDisabled}
               onClick={() => void execution.executeProtectedSwap()}
             >
               {execution.isExecuting
@@ -295,22 +339,22 @@ export default function TradePage() {
           )}
         </div>
 
-        {checklist.length > 0 && (
+        {signingDiagnostics.length > 0 && primaryStep !== "done" && (
           <div className="callout-slot" aria-live="polite">
             <RiskCallout heading="Still needed before signing">
               <ul>
-                {checklist.map((reason) => (
+                {signingDiagnostics.map((reason) => (
                   <li key={reason}>{reason}</li>
                 ))}
               </ul>
             </RiskCallout>
           </div>
         )}
-        {policy.policy?.registered && executionChecklist.length > 0 && (
+        {policy.policy?.registered && executionDiagnostics.length > 0 && (
           <div className="callout-slot" aria-live="polite">
             <RiskCallout heading="Still needed before execution">
               <ul>
-                {executionChecklist.map((reason) => (
+                {executionDiagnostics.map((reason) => (
                   <li key={reason}>{reason}</li>
                 ))}
               </ul>

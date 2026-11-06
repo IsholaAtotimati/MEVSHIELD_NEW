@@ -36,6 +36,19 @@ test("accepts a valid request for the configured candidate pool ID", () => {
   }
 });
 
+test("accepts a well-formed quote reference and rejects malformed references", () => {
+  const quoteId = `0x${"11".repeat(32)}`;
+  assert.equal(
+    PolicyRequestSchema.safeParse({ ...validRequest, quoteId }).success,
+    true,
+  );
+  assert.equal(
+    PolicyRequestSchema.safeParse({ ...validRequest, quoteId: "0x1234" })
+      .success,
+    false,
+  );
+});
+
 test("rejects a request that attempts to override pool-key or chain configuration", () => {
   assert.equal(
     PolicyRequestSchema.safeParse({

@@ -6,6 +6,11 @@ interface Window {
       method: string;
       params?: unknown[];
     }) => Promise<unknown>;
+    on?: (eventName: string, listener: (...args: unknown[]) => void) => void;
+    removeListener?: (
+      eventName: string,
+      listener: (...args: unknown[]) => void,
+    ) => void;
   };
 }
 

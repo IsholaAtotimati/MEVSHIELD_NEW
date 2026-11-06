@@ -59,7 +59,7 @@ One page per user-facing capability, each stating its status, what it does, what
 | --- | --- |
 | [protected-swap.md](features/protected-swap.md) | Gated |
 | [risk-preview.md](features/risk-preview.md) | Shipped. Price impact from active liquidity; the level can be LOW, MEDIUM, or HIGH |
-| [policy-lifecycle.md](features/policy-lifecycle.md) | Partial: no cancellation, no full-policy commitment, no caller authentication |
+| [policy-lifecycle.md](features/policy-lifecycle.md) | Partial: no cancellation or full-policy commitment |
 | [activity-history.md](features/activity-history.md) | Partial: local history complete, on-chain history bounded and incomplete |
 | [portfolio-and-approvals.md](features/portfolio-and-approvals.md) | Shipped |
 | [network-status.md](features/network-status.md) | Partial: four rows compare a chain read; the hook and router stay Not checked |

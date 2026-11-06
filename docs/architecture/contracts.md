@@ -299,7 +299,7 @@ The router also has no notion of the protected pool. It will route a swap for an
 | `test/SepoliaForkV2Router.t.sol` | Router and hook implementation deployed fresh onto a Sepolia fork |
 | `test/SepoliaForkCurrentPoolQuote.t.sol` | Same shape as the V2 suite against the current protected pool |
 | `test/SepoliaForkDeploymentVerification.t.sol` | Read-only checks of the live deployment and pool state |
-| `test/SepoliaForkDeploymentAExecution.t.sol` | Live router, hook, verifier, registry and pool together |
+| `test/SepoliaForkDeploymentBExecution.t.sol` | Live router, hook, verifier, registry and pool together |
 | `test/SepoliaForkQuote.t.sol` | Legacy deployment quote path |
 
 Details and gating flags are in [testing](../operations/testing.md).

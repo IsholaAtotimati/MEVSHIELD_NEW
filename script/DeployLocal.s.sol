@@ -63,10 +63,11 @@ contract DeployLocal is Script {
         PolicyRegistry(info.registry).setAuthorizedRegistrar(info.authorization);
         PolicyRegistry(info.registry).setAuthorizedConsumer(info.authorization);
 
-        (info.hook, info.salt) = _deployHook(info.manager, info.authorization);
-        PolicyAuthorization(info.authorization).setAuthorizedHook(info.hook);
-
+        // Deploy the router first because the hook trusts this address immutably.
         info.router = address(new MEVShieldRouter(IPoolManager(info.manager)));
+
+        (info.hook, info.salt) = _deployHook(info.manager, info.authorization, info.router);
+        PolicyAuthorization(info.authorization).setAuthorizedHook(info.hook);
 
         vm.stopBroadcast();
 
@@ -75,8 +76,11 @@ contract DeployLocal is Script {
         _logDeployment(info);
     }
 
-    function _deployHook(address manager, address authorization) internal returns (address hook, bytes32 salt) {
-        bytes memory constructorArgs = abi.encode(IPoolManager(manager), PolicyAuthorization(authorization));
+    function _deployHook(address manager, address authorization, address router)
+        internal
+        returns (address hook, bytes32 salt)
+    {
+        bytes memory constructorArgs = abi.encode(IPoolManager(manager), PolicyAuthorization(authorization), router);
 
         bytes memory initCode = abi.encodePacked(type(MEVShieldHook).creationCode, constructorArgs);
 
@@ -155,7 +159,7 @@ contract DeployLocal is Script {
         console2.log("MEVShieldHook:", info.hook);
         console2.log("MEVShieldRouter:", info.router);
         console2.log("AuthorizedSigner:", info.signer);
-        console2.log("AuthorizedRegistrar:", info.deployer);
+        console2.log("AuthorizedRegistrar:", info.authorization);
         console2.log("AuthorizedConsumer:", info.authorization);
         console2.log("CREATE2 Salt:");
         console2.logBytes32(info.salt);

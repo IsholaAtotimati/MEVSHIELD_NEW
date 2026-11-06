@@ -17,13 +17,12 @@ contract CalculateCurrentSepoliaLiquidityAmounts is Script {
 
     uint256 constant SEPOLIA_CHAIN_ID = 11155111;
     address constant MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address constant HOOK = 0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
+    address constant HOOK = 0x15D8C5eb1b839A4Fd86989348c1371c10168c080;
     address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
     uint24 constant FEE = 3000;
     int24 constant SPACING = 60;
-    bytes32 constant EXPECTED_POOL_ID =
-        0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    bytes32 constant EXPECTED_POOL_ID = 0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235;
 
     function run() external view {
         require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain");
@@ -44,13 +43,11 @@ contract CalculateCurrentSepoliaLiquidityAmounts is Script {
         (uint160 livePrice,,,) = manager.getSlot0(poolId);
         require(livePrice == 0, "pool state changed: inspect before proceeding");
 
-        uint256 requestedPrice =
-            vm.envUint("POOL_INITIAL_SQRT_PRICE_X96");
+        uint256 requestedPrice = vm.envUint("POOL_INITIAL_SQRT_PRICE_X96");
         require(requestedPrice <= type(uint160).max, "price exceeds uint160");
         uint160 sqrtPriceX96 = uint160(requestedPrice);
         require(
-            sqrtPriceX96 > TickMath.MIN_SQRT_PRICE &&
-            sqrtPriceX96 < TickMath.MAX_SQRT_PRICE,
+            sqrtPriceX96 > TickMath.MIN_SQRT_PRICE && sqrtPriceX96 < TickMath.MAX_SQRT_PRICE,
             "price outside TickMath bounds"
         );
 
@@ -64,22 +61,14 @@ contract CalculateCurrentSepoliaLiquidityAmounts is Script {
         require(lower < upper, "invalid tick range");
         require(lower % SPACING == 0 && upper % SPACING == 0, "ticks not aligned");
         require(lower <= initialTick && initialTick < upper, "price outside range");
-        require(
-            liquidityValue > 0 &&
-            liquidityValue <= uint256(uint128(type(int128).max)),
-            "invalid liquidity"
-        );
+        require(liquidityValue > 0 && liquidityValue <= uint256(uint128(type(int128).max)), "invalid liquidity");
 
         int128 liquidity = int128(uint128(liquidityValue));
         uint160 sqrtLower = TickMath.getSqrtPriceAtTick(lower);
         uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(upper);
 
-        int256 delta0 = SqrtPriceMath.getAmount0Delta(
-            sqrtPriceX96, sqrtUpper, liquidity
-        );
-        int256 delta1 = SqrtPriceMath.getAmount1Delta(
-            sqrtLower, sqrtPriceX96, liquidity
-        );
+        int256 delta0 = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtUpper, liquidity);
+        int256 delta1 = SqrtPriceMath.getAmount1Delta(sqrtLower, sqrtPriceX96, liquidity);
 
         require(delta0 <= 0 && delta1 <= 0, "unexpected delta signs");
 

@@ -26,9 +26,9 @@ Pinned in source:
 | --- | --- |
 | `SEPOLIA_CHAIN_ID` | `11155111` |
 | `EXPECTED_AUTHORIZED_SIGNER` | `0x016B78a30CE176EF0B90c122e8677e13aAB2A815` |
-| `EXPECTED_SEPOLIA_VERIFIER` | `0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f` |
-| `EXPECTED_SEPOLIA_ROUTER` | `0x633282608B2fc66cD7572f5eF58e804063aa150D` |
-| `EXPECTED_PROTECTED_POOL` | the WETH/USDC pool key and pool id `0x9275…b602` |
+| `EXPECTED_SEPOLIA_VERIFIER` | `0xD3635b589dB0B4E215283274937C0b7600314A6d` |
+| `EXPECTED_SEPOLIA_ROUTER` | `0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283` |
+| `EXPECTED_PROTECTED_POOL` | the WETH/USDC pool key and pool id `0xba95…2235` |
 
 Declared at [backend/src/config/runtimeConfig.ts:9](../../backend/src/config/runtimeConfig.ts#L9) to [backend/src/config/runtimeConfig.ts:22](../../backend/src/config/runtimeConfig.ts#L22).
 

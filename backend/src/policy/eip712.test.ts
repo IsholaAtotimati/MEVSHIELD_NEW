@@ -83,13 +83,13 @@ test("domain name and version match the PolicyVerifier EIP712 constructor", () =
 test("policyDomain carries the chain ID and verifying contract through", () => {
   const domain = policyDomain({
     chainId: 11155111,
-    verifyingContract: "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f",
+    verifyingContract: "0xD3635b589dB0B4E215283274937C0b7600314A6d",
   });
 
   assert.deepEqual(domain, {
     name: "MEVShield",
     version: "1",
     chainId: 11155111,
-    verifyingContract: "0x716f9315BC9c2AB98a82DDE78ca86887Ab61b79f",
+    verifyingContract: "0xD3635b589dB0B4E215283274937C0b7600314A6d",
   });
 });

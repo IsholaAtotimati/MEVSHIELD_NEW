@@ -9,13 +9,13 @@ import {
 } from "./poolState.js";
 
 const POOL_ID =
-  "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602";
+  "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235";
 /** Slot observed from PoolManager.extsload on Sepolia for this pool id. */
 const OBSERVED_SLOT0_KEY =
-  0x684074ab16a28d9cb93aba3e57ec1396ee2e2288a4ce82e78d17a979d29469c7n;
+  0xac20662634392d90bc66cf8254a4cd735b607d54187bf4ebe3f5b659faa84c5fn;
 const OBSERVED_SLOT0_WORD =
-  0x000000000bb80000000307570000000000004fbc6a1e3126042957bd9612d33dn;
-const OBSERVED_LIQUIDITY_WORD = 0x166e292da9cn;
+  0x000000000bb80000000309ae00000000000052280a823ab3172fde5ad4668b52n;
+const OBSERVED_LIQUIDITY_WORD = 0xe8d4a51000n;
 
 test("pool state slot matches the PoolManager layout used on Sepolia", () => {
   const slots = poolStateSlots(POOL_ID);
@@ -29,22 +29,22 @@ test("decodes the observed Sepolia slot0 and liquidity words", () => {
     OBSERVED_LIQUIDITY_WORD,
     999n,
   );
-  assert.equal(state.sqrtPriceX96, 1617238095152076543778314735768381n);
-  assert.equal(state.liquidity, 1_541_399_567_004n);
+  assert.equal(state.sqrtPriceX96, 1666329966287663205613998224870226n);
+  assert.equal(state.liquidity, 1_000_000_000_000n);
   assert.equal(state.feePips, 3000n);
 });
 
 test("uses the configured fee when slot0 lpFee is zero", () => {
-  const sqrtOnly = 1617238095152076543778314735768381n;
+  const sqrtOnly = 1666329966287663205613998224870226n;
   const state = decodePoolState(sqrtOnly, OBSERVED_LIQUIDITY_WORD, 3000n);
   assert.equal(state.feePips, 3000n);
-  assert.equal(state.liquidity, 1_541_399_567_004n);
+  assert.equal(state.liquidity, 1_000_000_000_000n);
 });
 
 test("returns zero liquidity instead of inventing depth", () => {
   const state = decodePoolState(OBSERVED_SLOT0_WORD, 0n, 3000n);
   assert.equal(state.liquidity, 0n);
-  assert.equal(state.sqrtPriceX96, 1617238095152076543778314735768381n);
+  assert.equal(state.sqrtPriceX96, 1666329966287663205613998224870226n);
 });
 
 test("uninitialized pool is a failed read", () => {

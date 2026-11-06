@@ -82,7 +82,7 @@ contract SepoliaForkV2RouterTest is Test {
         verifier.setAuthorizedSigner(signer);
         registry.setAuthorizedConsumer(address(authorization));
 
-        MEVShieldHook implementation = new MEVShieldHook(manager, authorization);
+        MEVShieldHook implementation = new MEVShieldHook(manager, authorization, address(router));
         vm.etch(HOOK, address(implementation).code);
         hook = MEVShieldHook(HOOK);
         authorization.setAuthorizedHook(address(hook));
@@ -90,6 +90,7 @@ contract SepoliaForkV2RouterTest is Test {
 
         require(address(hook.poolManager()) == POOL_MANAGER, "fork hook PoolManager mismatch");
         require(address(hook.authorization()) == address(authorization), "fork hook authorization mismatch");
+        require(address(hook.trustedRouter()) == address(router), "fork hook trusted router mismatch");
         require(address(router.poolManager()) == POOL_MANAGER, "fork router PoolManager mismatch");
 
         nonce = uint256(keccak256(abi.encode(block.number, address(this))));
@@ -231,9 +232,7 @@ contract SepoliaForkV2RouterTest is Test {
     /// @dev Select a price limit 500 ticks from the current fork pool tick.
     function _priceLimit(bool zeroForOne) private view returns (uint160) {
         (, int24 currentTick,,) = StateLibrary.getSlot0(manager, poolKey.toId());
-        int24 limitTick = zeroForOne
-            ? currentTick - int24(500)
-            : currentTick + int24(500);
+        int24 limitTick = zeroForOne ? currentTick - int24(500) : currentTick + int24(500);
         return TickMath.getSqrtPriceAtTick(limitTick);
     }
 
@@ -243,7 +242,7 @@ contract SepoliaForkV2RouterTest is Test {
     {
         policy = MEVShieldHook.Policy({
             poolId: EXPECTED_POOL_ID,
-            trader: address(router),
+            trader: address(this),
             nonce: nonce++,
             expiry: block.timestamp + 1 hours,
             maxLoss: 0,

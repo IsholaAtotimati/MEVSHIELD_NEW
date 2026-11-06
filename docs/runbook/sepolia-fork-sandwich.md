@@ -6,7 +6,7 @@ This runbook records local fork demonstrations and the pool-state risk estimate 
 
 `test/SepoliaForkSandwich.t.sol`, test `test_forkSandwich_unprotectedReceivesLess_protectedReverts`.
 
-The fork is Ethereum Sepolia at the public RPC `https://ethereum-sepolia-rpc.publicnode.com`. The pool is the live USDC/WETH pool (`0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602`) on PoolManager `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`. USDC is `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`. WETH is `0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14`. Tokens are funded with Foundry `deal`, not a faucet.
+The fork is Ethereum Sepolia at the public RPC `https://ethereum-sepolia-rpc.publicnode.com`. The pool is the live USDC/WETH pool (`0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235`) on PoolManager `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`. USDC is `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`. WETH is `0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14`. Tokens are funded with Foundry `deal`, not a faucet.
 
 The sequence, all in the same direction (USDC in, WETH out):
 
@@ -19,12 +19,12 @@ The victim price limit is 40 ticks below the starting tick, inside the router's 
 
 ## Code under test
 
-Deployed into the fork from this repository, and not the live router `0x633282608B2fc66cD7572f5eF58e804063aa150D`:
+Deployed into the fork from this repository, and not the live router `0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283`:
 
 - `PolicyRegistry`, `PolicyVerifier`, `PolicyAuthorization`
 - `MEVShieldRouter`, constructed against the forked PoolManager
 
-The live hook `0xd15E4fDD391a68C2F1C385d1a819117a3aD40080` has the Uniswap v4 `beforeSwap` permission bit set, so every swap calls it. That deployment accepts only signer `0x016B78a30CE176EF0B90c122e8677e13aAB2A815`. This test does not have that key and does not impersonate it. It etches this repository's `MEVShieldHook`, wired to a fork-local signer (`0xA11CE`), onto that address. That is the same etch pattern as `test/SepoliaForkV2Router.t.sol`. The price and liquidity are the forked pool's. The swap that moves the tick is a real `PoolManager.swap`.
+The live hook `0x15D8C5eb1b839A4Fd86989348c1371c10168c080` has the Uniswap v4 `beforeSwap` permission bit set, so every swap calls it. That deployment accepts only signer `0x016B78a30CE176EF0B90c122e8677e13aAB2A815`. This test does not have that key and does not impersonate it. It etches this repository's `MEVShieldHook`, wired to a fork-local signer (`0xA11CE`), onto that address. That is the same etch pattern as `test/SepoliaForkV2Router.t.sol`. The price and liquidity are the forked pool's. The swap that moves the tick is a real `PoolManager.swap`.
 
 The revert is `MEVShieldRouter._enforceMinimumOutput` (`src/MEVShieldRouter.sol`). `_validatePriceLimit` in the same contract can revert with `InvalidPriceLimit` when a limit is on the wrong side of the price or outside tick bounds; this run did not hit that path. `PriceLimitTooFar` is a different error and is not treated as success.
 

@@ -4,6 +4,8 @@ import type { TokenSymbol } from "../config/swapPool";
 
 export type DeploymentStatus = {
   poolManager: `0x${string}` | null;
+  routerPoolManager: `0x${string}` | null;
+  routerHasCode: boolean;
   authorization: `0x${string}` | null;
   registry: `0x${string}` | null;
   registryOwner: `0x${string}` | null;
@@ -34,6 +36,28 @@ export type PolicyResponse = {
   demoMode?: boolean;
   txHash?: Hex;
   registered?: boolean;
+};
+
+export type LiveProtectedQuoteResponse = {
+  chainId: number;
+  poolId: string;
+  zeroForOne: boolean;
+  amountSpecified: string;
+  amountOut: string;
+  minAmountOut: string;
+  priceImpactBps: number;
+  sqrtPriceLimitX96: string;
+  feePips: number;
+  blockNumber: number;
+  blockTimestamp: number;
+  quotedAt: string;
+  expiresAt: string;
+  quoteId: string;
+  poolState: {
+    sqrtPriceX96: string;
+    tick: number;
+    liquidity: string;
+  };
 };
 
 export type RiskPreviewResult = {

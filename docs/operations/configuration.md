@@ -59,11 +59,15 @@ Read in [backend/src/config/runtimeConfig.ts](../../backend/src/config/runtimeCo
 | Name | Required | Default | Purpose | Safety note |
 | --- | --- | --- | --- | --- |
 | `CHAIN_ID` | required | none | Must equal `11155111` | Any other value throws at startup. There is no local-chain mode |
-| `POLICY_VERIFIER_ADDRESS` | required, or one of the aliases | none | Verifier address | Must equal the pinned verifier `0x716f…b79f` or startup throws |
-| `VERIFIER_ADDRESS` | alias | none | Second name for the verifier | Same pin applies. Listed second in resolution order |
-| `POLICY_VERIFIER` | alias | none | Third name for the verifier | Same pin applies. Listed third |
-| `ROUTER_ADDRESS` | required, or the alias | none | Router address | Must equal the pinned router `0x6332…150D` or startup throws |
-| `MEVSHIELD_ROUTER` | alias | none | Second name for the router | Same pin applies. Lower precedence than `ROUTER_ADDRESS` |
+| `POLICY_VERIFIER_ADDRESS` | required, or one of the aliases | none | Verifier address | Must match the pinned verifier; conflicting aliases fail startup |
+| `VERIFIER_ADDRESS` | alias | none | Second name for the verifier | Same pin applies; all configured aliases must agree |
+| `POLICY_VERIFIER` | alias | none | Third name for the verifier | Same pin applies; all configured aliases must agree |
+| `ROUTER_ADDRESS` | required, or the alias | none | Router address | Must match the pinned router; conflicting aliases fail startup |
+| `MEVSHIELD_ROUTER` | alias | none | Second name for the router | Same pin applies; all configured aliases must agree |
+| `MEVSHIELD_V2_DEPLOYMENT_VERIFIED` | optional | `false` | Enables the verified Sepolia deployment pin set | Set only after deployed addresses and pool pass the read-only migration preflight. This is an operator assertion, not an on-chain check performed by backend startup |
+| `MEVSHIELD_SEPOLIA_SIGNER_ADDRESS`, `MEVSHIELD_SEPOLIA_VERIFIER_ADDRESS`, `MEVSHIELD_SEPOLIA_ROUTER_ADDRESS` | required when deployment verified | none | Replacement Sepolia signer, verifier, and router pins | Valid Ethereum addresses required; the signer key and configured contract addresses must match |
+| `MEVSHIELD_SEPOLIA_REGISTRY_ADDRESS`, `MEVSHIELD_SEPOLIA_AUTHORIZATION_ADDRESS` | required when deployment verified | none | Replacement registry and authorization pins | Required and matched against the configured aliases |
+| `MEVSHIELD_SEPOLIA_HOOK_ADDRESS`, `MEVSHIELD_SEPOLIA_POOL_ID` | required when deployment verified | none | Replacement pool hook and Pool ID pins | Must match the hook configured in the pool key and its recomputed Pool ID |
 | `FRONTEND_URL` | optional | `http://localhost:5173` | The single allowed CORS origin | A wrong value silently blocks the browser client. It does not block non-browser clients |
 
 ### Protected pool
@@ -74,19 +78,19 @@ All six are required. A missing or malformed value throws at startup.
 | --- | --- | --- | --- | --- |
 | `PROTECTED_POOL_CURRENCY0` | required | none | Lower-sorted currency | Must be a valid address, and must sort below `CURRENCY1` |
 | `PROTECTED_POOL_CURRENCY1` | required | none | Higher-sorted currency | Must be a valid address |
-| `PROTECTED_POOL_FEE` | required | none | Pool fee in hundredths of a bip | Must be a non-negative safe integer, and must be 3000 to match the pin |
-| `PROTECTED_POOL_TICK_SPACING` | required | none | Pool tick spacing | Same integer rules, and must be 60 to match the pin |
-| `PROTECTED_POOL_HOOK` | required | none | Hook address in the pool key | Must equal the pinned hook `0xd15E…0080` |
-| `PROTECTED_POOL_ID` | required | none | 32-byte pool id | Must be 32-byte hex, and must equal the id recomputed from the other five values. The derived id is then compared to the pinned id |
+| `PROTECTED_POOL_FEE` | required | none | Pool fee in hundredths of a bip | Must be a non-negative safe integer, and must be 3000 |
+| `PROTECTED_POOL_TICK_SPACING` | required | none | Pool tick spacing | Same integer rules, and must be 60 |
+| `PROTECTED_POOL_HOOK` | required | none | Hook address in the pool key | Must match `HOOK_ADDRESS`; with verified deployment pins it must also match `MEVSHIELD_SEPOLIA_HOOK_ADDRESS` |
+| `PROTECTED_POOL_ID` | required | none | 32-byte pool id | Must match the ID recomputed from the other five values; with verified deployment pins it must also match `MEVSHIELD_SEPOLIA_POOL_ID` |
 
-The whole pool block is compared against `EXPECTED_PROTECTED_POOL` ([backend/src/config/runtimeConfig.ts:97](../../backend/src/config/runtimeConfig.ts#L97)). Editing one variable to point at a different pool fails startup rather than serving a mismatch.
+Without `MEVSHIELD_V2_DEPLOYMENT_VERIFIED=true`, the pool is additionally compared against the legacy Sepolia source pins. A replacement pool may use different hook and Pool ID pins only when the verified-deployment flag and complete replacement address set are present. Editing only one pool field still fails validation.
 
 ### Signing
 
 | Name | Required | Default | Purpose | Safety note |
 | --- | --- | --- | --- | --- |
-| `MEVSHIELD_V2_POLICY_ENABLED` | optional | unset, treated as false | Opens `POST /policy` | The literal string `true` is required. Any other value leaves the route at 503. Opening it exposes an unauthenticated signing endpoint |
-| `SIGNER_PRIVATE_KEY` | required only when signing is enabled | none | The EIP-712 signing key | Loaded into an in-process wallet. The derived address must equal `0x016B…A815` or startup throws. Validation errors never echo the key |
+| `MEVSHIELD_V2_POLICY_ENABLED` | optional | unset, treated as false | Requests policy signing | On Sepolia, both this and `MEVSHIELD_V2_DEPLOYMENT_VERIFIED=true` are required. The endpoint remains unauthenticated; do not enable before deployment and preflight |
+| `SIGNER_PRIVATE_KEY` | required only when signing is enabled | none | The EIP-712 signing key | Loaded into an in-process wallet. Its derived address must equal the active signer pin. Validation errors never echo the key |
 | `MEVSHIELD_SEPOLIA_DEMO_ENABLED` | optional | unset, treated as false | Enables demo signing | Requires `NODE_ENV` not `production` and `RAILWAY_ENVIRONMENT_NAME` unset. Demo mode signs a fixed 1-base-unit minimum |
 
 ### Monitor
@@ -97,6 +101,8 @@ The whole pool block is compared against `EXPECTED_PROTECTED_POOL` ([backend/src
 | `RPC_URL` | alias | none | Second name for the RPC | Same as above |
 | `POLICY_REGISTRY_ADDRESS` | required for the monitor | none | Registry to scan | Not compared to the pinned deployment. A wrong value scans the wrong contract |
 | `POLICY_REGISTRY` | alias | none | Second name for the registry | Same as above |
+| `POLICY_AUTHORIZATION_ADDRESS` | required with verified deployment pins | none | Authorization contract pin | Must agree with `POLICY_AUTHORIZATION` if both are set, and with the verified authorization pin |
+| `POLICY_AUTHORIZATION` | alias | none | Second name for authorization | Same as above |
 | `HOOK_ADDRESS` | required for the monitor | none | Hook to scan | Not compared to the pinned deployment |
 | `MEVSHIELD_HOOK_ADDRESS` | alias | none | Second name for the hook | Same as above |
 | `ROUTER_ADDRESS` / `MEVSHIELD_ROUTER` | optional for the monitor | none | Router address used in `swap_confirmed` when the receipt has no `to` | A malformed value throws at startup. Reuses the same variables as the pinned router check |
@@ -120,11 +126,86 @@ Read by Foundry scripts and the gated fork tests. Foundry reads a root `.env` by
 | `POLICY_VERIFIER` | required by `RunProtectedSwap` and `EnableUserPaidRegistrationSepolia` | none | Existing verifier | Read only |
 | `POLICY_AUTHORIZATION` | required by `RunProtectedSwap` | none | Existing authorization contract | Read only |
 
+### Read-only migration preflight
+
+Before and after a replacement deployment, run `PreflightSepoliaMigration.s.sol`
+with `ROUTER_ADDRESS` (or `MEVSHIELD_ROUTER`), `HOOK_ADDRESS` (or
+`MEVSHIELD_HOOK`), `POLICY_AUTHORIZATION` (or
+`POLICY_AUTHORIZATION_ADDRESS`), `POLICY_REGISTRY` (or
+`POLICY_REGISTRY_ADDRESS`), and `POLICY_VERIFIER` (or
+`POLICY_VERIFIER_ADDRESS`) set to the candidate addresses. The script uses the
+existing Sepolia PoolManager and WETH/USDC pair; optionally set
+`EXPECTED_AUTHORIZED_SIGNER` and `EXPECTED_POOL_ID` to assert those values.
+
+Run it without `--broadcast`:
+
+```sh
+forge script script/PreflightSepoliaMigration.s.sol:PreflightSepoliaMigration \
+  --rpc-url "$SEPOLIA_RPC_URL"
+```
+
+It reports missing addresses, code and wiring mismatches, the calculated Pool
+ID, and whether that pool is initialized with nonzero active liquidity. Before
+deployment, missing candidate contracts are expected and reported as blockers.
+A `READY` result is only a configuration/state preflight: it does not verify
+deployed bytecode against source, prove swap execution, or open the frontend
+execution gate.
+
+For the new deployment, the following commands are **for review only**; do not
+run them with `--broadcast` until deployment and funding are explicitly
+authorized. Foundry loads `DEPLOYER_PRIVATE_KEY` and `SIGNER_PRIVATE_KEY` from
+the root `.env`; keep both secret. The deployer must be the configured
+authorized signer address.
+
+```sh
+forge script script/DeploySepolia.s.sol:DeploySepolia \
+  --rpc-url "$SEPOLIA_RPC_URL" --broadcast -vvvv
+```
+
+After deployment, set `ROUTER_ADDRESS`, `HOOK_ADDRESS`,
+`POLICY_AUTHORIZATION`, `POLICY_REGISTRY`, and `POLICY_VERIFIER` from the
+deployment output. Run the preflight once to obtain the calculated Pool ID,
+then set `EXPECTED_POOL_ID` to that value and run it again:
+
+```sh
+forge script script/PreflightSepoliaMigration.s.sol:PreflightSepoliaMigration \
+  --rpc-url "$SEPOLIA_RPC_URL"
+```
+
+Only after reviewing the deployment output and the matching Pool ID should the
+initialization command be prepared. Its `POOL_INITIAL_SQRT_PRICE_X96` must come
+from a fresh, independently checked price source; do not reuse an old snapshot.
+It also requires the deployment addresses above and `EXPECTED_POOL_ID`:
+
+```sh
+forge script script/InitializeSepoliaProtectedPool.s.sol:InitializeSepoliaProtectedPool \
+  --rpc-url "$SEPOLIA_RPC_URL" --broadcast -vvvv
+```
+
+Initialization alone leaves active liquidity at zero. For a replacement-pool
+liquidity plan, `PrepareSepoliaPool.s.sol` and
+`CalculateInitializedSepoliaLiquidityAmounts.s.sol` require the deployed
+`HOOK_ADDRESS` and matching `EXPECTED_POOL_ID`; both remain read-only. The
+amount calculator also requires `POOL_INITIAL_SQRT_PRICE_X96`,
+`POOL_TICK_LOWER`, `POOL_TICK_UPPER`, `POOL_LIQUIDITY`,
+`POOL_AMOUNT0_MAX`, and `POOL_AMOUNT1_MAX`. The planner additionally requires
+`POOL_SETUP_STAGE=liquidity`, `POOL_LP_OWNER`,
+`POOL_POSITION_RECIPIENT`, and `POOL_POSITION_DEADLINE`. It prints calldata
+but does not add liquidity; use a separately reviewed PositionManager
+transaction only after checking balances and both approval layers.
+Backend Sepolia address/pool pins and frontend `VITE_*_ADDRESS` overrides must
+be updated together only after deployment verification; the execute gate
+remains closed until then.
+
 ### Pool setup
 
 | Name | Required | Default | Purpose |
 | --- | --- | --- | --- |
+| `HOOK_ADDRESS` | replacement liquidity planning | none | Deployed replacement hook |
+| `EXPECTED_POOL_ID` | replacement pool scripts | none | Pool ID calculated from the replacement PoolKey |
 | `POOL_INITIAL_SQRT_PRICE_X96` | varies by script | `PlanCurrentSepoliaPoolInitialization` defaults it | Initial pool price |
+| `POOL_TICK_LOWER` | liquidity amount calculator and planner | none | Lower position tick, aligned to spacing 60 |
+| `POOL_TICK_UPPER` | liquidity amount calculator and planner | none | Upper position tick, aligned to spacing 60 |
 | `POOL_LIQUIDITY` | varies | none | Liquidity to add |
 | `POOL_AMOUNT0_MAX` | varies | none | Currency0 cap |
 | `POOL_AMOUNT1_MAX` | varies | none | Currency1 cap |

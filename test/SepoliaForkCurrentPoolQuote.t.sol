@@ -82,7 +82,7 @@ contract SepoliaForkCurrentPoolQuoteTest is Test {
         verifier.setAuthorizedSigner(signer);
         registry.setAuthorizedConsumer(address(authorization));
 
-        MEVShieldHook implementation = new MEVShieldHook(manager, authorization);
+        MEVShieldHook implementation = new MEVShieldHook(manager, authorization, address(router));
         vm.etch(HOOK, address(implementation).code);
         hook = MEVShieldHook(HOOK);
         authorization.setAuthorizedHook(address(hook));
@@ -90,6 +90,7 @@ contract SepoliaForkCurrentPoolQuoteTest is Test {
 
         require(address(hook.poolManager()) == POOL_MANAGER, "fork hook PoolManager mismatch");
         require(address(hook.authorization()) == address(authorization), "fork hook authorization mismatch");
+        require(address(hook.trustedRouter()) == address(router), "fork hook trusted router mismatch");
         require(address(router.poolManager()) == POOL_MANAGER, "fork router PoolManager mismatch");
 
         nonce = uint256(keccak256(abi.encode(block.number, address(this))));
@@ -228,7 +229,6 @@ contract SepoliaForkCurrentPoolQuoteTest is Test {
         console2.log("LOCAL FORK V2 - One unit above minimum reverted.");
     }
 
-
     function test_QuoteForRequest() public {
         uint256 amountIn = vm.envUint("QUOTE_AMOUNT_IN");
         string memory direction = vm.envString("QUOTE_DIRECTION");
@@ -245,9 +245,7 @@ contract SepoliaForkCurrentPoolQuoteTest is Test {
             inputToken = USDC;
             outputToken = WETH;
             priceLimit = _priceLimit(true);
-        } else if (
-            keccak256(bytes(direction)) == keccak256(bytes("WETH_TO_USDC"))
-        ) {
+        } else if (keccak256(bytes(direction)) == keccak256(bytes("WETH_TO_USDC"))) {
             zeroForOne = false;
             inputToken = WETH;
             outputToken = USDC;
@@ -258,14 +256,10 @@ contract SepoliaForkCurrentPoolQuoteTest is Test {
 
         require(amountIn <= uint256(type(int256).max), "input too large");
 
-        MEVShieldHook.Policy memory policy =
-            _registerPolicy(zeroForOne, -int256(amountIn), priceLimit, 1);
+        MEVShieldHook.Policy memory policy = _registerPolicy(zeroForOne, -int256(amountIn), priceLimit, 1);
 
         deal(inputToken, address(this), amountIn);
-        require(
-            IERC20Minimal(inputToken).approve(address(router), amountIn),
-            "input approval failed"
-        );
+        require(IERC20Minimal(inputToken).approve(address(router), amountIn), "input approval failed");
 
         BalanceDelta delta = router.executeSwap(
             poolKey,
@@ -291,12 +285,9 @@ contract SepoliaForkCurrentPoolQuoteTest is Test {
 
     /// @dev Directional price limit 500 ticks from the current pool tick.
     function _priceLimit(bool zeroForOne) private view returns (uint160) {
-        (, int24 currentTick,,) =
-            StateLibrary.getSlot0(manager, PoolId.wrap(EXPECTED_POOL_ID));
+        (, int24 currentTick,,) = StateLibrary.getSlot0(manager, PoolId.wrap(EXPECTED_POOL_ID));
 
-        int24 limitTick = zeroForOne
-            ? currentTick - 500
-            : currentTick + 500;
+        int24 limitTick = zeroForOne ? currentTick - 500 : currentTick + 500;
 
         return TickMath.getSqrtPriceAtTick(limitTick);
     }

@@ -4,6 +4,9 @@ import cors from "cors";
 import { z } from "zod";
 import { AbiCoder, keccak256, type Wallet } from "ethers";
 import { fileURLToPath } from "node:url";
+import { AuthService } from "./auth/auth.js";
+import { MemoryStateStore, SharedStateUnavailableError, type SharedStateStore } from "./state/stateStore.js";
+import { RedisStateStore } from "./state/redisStateStore.js";
 
 import { generatePolicy } from "./policy/policyGenerator.js";
 import {
@@ -11,6 +14,11 @@ import {
   createProtectedPoolReader,
   type PoolStateReader,
 } from "./risk/poolState.js";
+import {
+  ProtectedQuoteError,
+  isCachedQuoteValidForPolicy,
+  readProtectedV4Quote,
+} from "./risk/v4Quote.js";
 import {
   previewRisk,
   RiskPreviewRequestSchema,
@@ -32,6 +40,7 @@ import {
   assertConfiguredPoolId,
   EXPECTED_AUTHORIZED_SIGNER,
   EXPECTED_SEPOLIA_ROUTER,
+  isLocalChainEnabled,
   isLocalSepoliaDemoEnabled,
   loadBackendConfig,
   publicProtectedPoolConfig,
@@ -49,17 +58,26 @@ export type AppDependencies = {
   getMonitorStatus: () => SepoliaMonitorSnapshot;
   readPoolState: PoolStateReader;
   frontendUrl?: string;
-};
+  authService?: AuthService;
+  stateStore: SharedStateStore;
+}
 
 export function resolvePolicySigningEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const localDemo = isLocalSepoliaDemoEnabled(env);
-  return env.MEVSHIELD_V2_POLICY_ENABLED === "true" || localDemo;
+  const verifiedSepolia =
+    isLocalChainEnabled(env) ||
+    env.MEVSHIELD_V2_DEPLOYMENT_VERIFIED === "true";
+  return (
+    localDemo ||
+    (verifiedSepolia && env.MEVSHIELD_V2_POLICY_ENABLED === "true")
+  );
 }
 
 export function loadAppDependencies(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv,
+  stateStore: SharedStateStore,
 ): AppDependencies {
   const localDemoMode = isLocalSepoliaDemoEnabled(env);
   const policySigningEnabled = resolvePolicySigningEnabled(env);
@@ -85,10 +103,43 @@ export function loadAppDependencies(
       backendConfig.chainId,
     ),
     frontendUrl: env.FRONTEND_URL,
+    stateStore,
+    authService: new AuthService({
+      chainId: backendConfig.chainId,
+      applicationOrigin: requireAuthenticationOrigin(env.FRONTEND_URL, env.NODE_ENV),
+    }, stateStore),
   };
 }
 
+export function requireAuthenticationOrigin(
+  frontendUrl: string | undefined,
+  nodeEnv = process.env.NODE_ENV,
+): string {
+  const origin =
+    frontendUrl?.split(",")[0]?.trim() ??
+    (nodeEnv === "production" ? undefined : "http://localhost:5173");
+  if (!origin) {
+    throw new Error(
+      "FRONTEND_URL is required to bind wallet authentication to the application domain.",
+    );
+  }
+  if (new URL(origin).origin !== origin) {
+    throw new Error("FRONTEND_URL must be an exact application origin.");
+  }
+  return origin;
+}
+
+function clientIp(req: Request): string {
+  return req.socket.remoteAddress ?? "unknown";
+}
+
 export function createApp(deps: AppDependencies): Express {
+  if (
+    process.env.NODE_ENV === "production" &&
+    deps.stateStore instanceof MemoryStateStore
+  ) {
+    throw new Error("Production backend cannot use process-local shared state.");
+  }
   const app = express();
   const configuredOrigins = (deps.frontendUrl ?? "")
     .split(",")
@@ -100,6 +151,12 @@ export function createApp(deps: AppDependencies): Express {
       : process.env.NODE_ENV === "production"
         ? []
         : ["http://localhost:5173"];
+  const authService =
+    deps.authService ??
+    new AuthService({
+      chainId: deps.chainId,
+      applicationOrigin: requireAuthenticationOrigin(deps.frontendUrl),
+    }, deps.stateStore);
 
   app.use(requestIdMiddleware);
   app.use(httpLifecycleMiddleware);
@@ -108,6 +165,7 @@ export function createApp(deps: AppDependencies): Express {
       origin: (origin, callback) => {
         callback(null, !origin || allowedOrigins.includes(origin));
       },
+      allowedHeaders: ["Content-Type", "Authorization", "x-request-id"],
       exposedHeaders: ["x-request-id"],
     }),
   );
@@ -128,6 +186,18 @@ export function createApp(deps: AppDependencies): Express {
     errorName: z.string().max(100).optional(),
     errorMessage: z.string().max(300).optional(),
   });
+  const LiveQuoteRequestSchema = z.object({
+    amountIn: z.string().regex(/^[1-9]\d{0,77}$/),
+    zeroForOne: z.boolean(),
+    slippageBps: z.number().int().min(1).max(1000),
+  }).strict();
+  const AuthNonceSchema = z.object({
+    address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  }).strict();
+  const AuthVerifySchema = z.object({
+    message: z.string().min(1).max(5000),
+    signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+  }).strict();
 
   app.get("/health", (_req, res) => {
     const monitor = deps.getMonitorStatus();
@@ -144,6 +214,132 @@ export function createApp(deps: AppDependencies): Express {
 
   app.get("/config/protected-pool", (_req, res) => {
     res.json(publicProtectedPoolConfig(deps.chainId, deps.protectedPool));
+  });
+
+  app.post("/auth/nonce", async (req, res) => {
+    const ip = clientIp(req);
+    let limit;
+    try {
+      limit = await deps.stateStore.consumeRateLimit(
+        `mevshield:rate:nonce:ip:${ip}`,
+        5 * 60_000,
+        10,
+      );
+    } catch (error) {
+      if (error instanceof SharedStateUnavailableError) {
+        return sendApiError(res, 503, "state_unavailable", "Authentication is temporarily unavailable.");
+      }
+      throw error;
+    }
+    if (!limit.ok) {
+      res.setHeader("Retry-After", String(limit.retryAfterSeconds));
+      return sendApiError(res, 429, "rate_limited", "Too many authentication attempts.");
+    }
+    const parsed = AuthNonceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendApiError(res, 400, "invalid_auth", "A valid wallet address is required.");
+    }
+    try {
+      return res.json(await authService.issueNonce(parsed.data.address));
+    } catch (error) {
+      if (error instanceof SharedStateUnavailableError) {
+        return sendApiError(res, 503, "state_unavailable", "Authentication is temporarily unavailable.");
+      }
+      return sendApiError(res, 503, "auth_unavailable", "Authentication is temporarily unavailable.");
+    }
+  });
+
+  app.post("/auth/verify", async (req, res) => {
+    const ip = clientIp(req);
+    let limit;
+    try {
+      limit = await deps.stateStore.consumeRateLimit(
+        `mevshield:rate:verify:ip:${ip}`,
+        5 * 60_000,
+        10,
+      );
+    } catch (error) {
+      if (error instanceof SharedStateUnavailableError) {
+        return sendApiError(res, 503, "state_unavailable", "Authentication is temporarily unavailable.");
+      }
+      throw error;
+    }
+    if (!limit.ok) {
+      res.setHeader("Retry-After", String(limit.retryAfterSeconds));
+      return sendApiError(res, 429, "rate_limited", "Too many authentication attempts.");
+    }
+    const parsed = AuthVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendApiError(res, 400, "invalid_auth", "Invalid authentication request.");
+    }
+    let result;
+    try {
+      result = await authService.verify(parsed.data.message, parsed.data.signature);
+    } catch (error) {
+      if (error instanceof SharedStateUnavailableError) {
+        return sendApiError(res, 503, "state_unavailable", "Authentication is temporarily unavailable.");
+      }
+      return sendApiError(res, 503, "auth_unavailable", "Authentication is temporarily unavailable.");
+    }
+    if (!result.ok) {
+      return sendApiError(
+        res,
+        result.code === "invalid_auth" ? 401 : 503,
+        result.code,
+        result.message,
+      );
+    }
+    return res.json({
+      token: result.token,
+      address: result.address,
+      expiresAt: new Date(result.expiresAt).toISOString(),
+    });
+  });
+
+  app.post("/quote", async (req, res) => {
+    const parsed = LiveQuoteRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendApiError(
+        res,
+        400,
+        "invalid_quote_request",
+        "Invalid live-quote request",
+        { details: parsed.error.issues },
+      );
+    }
+
+    try {
+      const quote = await readProtectedV4Quote(
+        process.env,
+        deps.chainId,
+        deps.protectedPool,
+        parsed.data,
+        deps.stateStore,
+      );
+      return res.json(quote);
+    } catch (error) {
+      if (error instanceof SharedStateUnavailableError) {
+        return sendApiError(res, 503, "state_unavailable", "A live protected-pool quote is unavailable.");
+      }
+      if (error instanceof ProtectedQuoteError) {
+        return sendApiError(
+          res,
+          422,
+          "quote_unavailable",
+          error.message,
+        );
+      }
+      logEvent("error", "live_quote_failed", {
+        requestId: String(res.locals.requestId),
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      return sendApiError(
+        res,
+        503,
+        "quote_unavailable",
+        "A live protected-pool quote is unavailable.",
+      );
+    }
   });
 
   app.post("/risk-preview", async (req, res) => {
@@ -198,6 +394,30 @@ export function createApp(deps: AppDependencies): Express {
     }
 
     try {
+      const ipLimit = await deps.stateStore.consumeRateLimit(
+        `mevshield:rate:policy:ip:${clientIp(req)}`,
+        60_000,
+        30,
+      );
+      if (!ipLimit.ok) {
+        res.setHeader("Retry-After", String(ipLimit.retryAfterSeconds));
+        return sendApiError(res, 429, "rate_limited", "Too many policy requests.");
+      }
+      const authorization = req.header("authorization");
+      const token = authorization?.match(/^Bearer ([A-Za-z0-9_-]{20,})$/)?.[1];
+      const session = await authService.getSession(token);
+      if (!session) {
+        return sendApiError(res, 401, "invalid_auth", "A valid wallet session is required.");
+      }
+      const walletLimit = await deps.stateStore.consumeRateLimit(
+        `mevshield:rate:policy:wallet:${session.address.toLowerCase()}`,
+        60_000,
+        10,
+      );
+      if (!walletLimit.ok) {
+        res.setHeader("Retry-After", String(walletLimit.retryAfterSeconds));
+        return sendApiError(res, 429, "rate_limited", "Too many policy requests.");
+      }
       const input = PolicyRequestSchema.parse(req.body);
       const requestId = String(res.locals.requestId);
 
@@ -253,13 +473,21 @@ export function createApp(deps: AppDependencies): Express {
         );
       }
 
-      if (input.trader.toLowerCase() !== deps.routerAddress.toLowerCase()) {
+      if (input.trader.toLowerCase() === "0x0000000000000000000000000000000000000000") {
         return sendApiError(
           res,
           400,
           "invalid_trader",
           "Invalid policy trader",
-          { details: "The policy trader must be the configured MEVShield router." },
+          { details: "The policy trader must be the wallet that will execute the swap." },
+        );
+      }
+      if (input.trader.toLowerCase() !== session.address.toLowerCase()) {
+        return sendApiError(
+          res,
+          401,
+          "invalid_auth",
+          "The authenticated wallet must match the policy trader.",
         );
       }
 
@@ -272,6 +500,25 @@ export function createApp(deps: AppDependencies): Express {
       });
 
       const pool = await deps.readPoolState();
+      if (
+        !deps.localDemoMode &&
+        !await isCachedQuoteValidForPolicy({
+          quoteId: input.quoteId ?? "",
+          poolId: input.poolId,
+          amountSpecified: input.amountSpecified,
+          zeroForOne: input.zeroForOne,
+          sqrtPriceLimitX96: input.sqrtPriceLimitX96,
+          minAmountOut: input.minAmountOut,
+        }, deps.stateStore)
+      ) {
+        return sendApiError(
+          res,
+          409,
+          "quote_expired_or_mismatched",
+          "A fresh live quote matching the signed swap parameters is required.",
+        );
+      }
+
       const result = generatePolicy(
         {
           poolId: input.poolId,
@@ -360,6 +607,9 @@ export function createApp(deps: AppDependencies): Express {
       if (error instanceof PoolStateUnavailableError) {
         return sendApiError(res, 503, "pool_state_unavailable", error.message);
       }
+      if (error instanceof SharedStateUnavailableError) {
+        return sendApiError(res, 503, "state_unavailable", "Protected policy service is temporarily unavailable.");
+      }
 
       if (error instanceof z.ZodError) {
         return sendApiError(res, 400, "invalid_request", "Invalid request", {
@@ -431,12 +681,42 @@ function isDirectExecution(): boolean {
   return fileURLToPath(import.meta.url) === entry;
 }
 
-export function startServer(
-  deps: AppDependencies = loadAppDependencies(),
-): Express {
-  const app = createApp(deps);
+async function createConfiguredStateStore(
+  env: NodeJS.ProcessEnv,
+): Promise<SharedStateStore> {
+  const redisUrl = env.REDIS_URL?.trim();
+  if (redisUrl) return RedisStateStore.connect(redisUrl);
+  if (env.NODE_ENV === "production") {
+    throw new Error("REDIS_URL is required in production for shared authentication and quote state.");
+  }
+  return new MemoryStateStore();
+}
 
-  if (deps.localDemoMode) {
+export async function startServer(
+  deps?: AppDependencies,
+): Promise<Express> {
+  let stateStore: SharedStateStore | undefined;
+  let resolvedDeps = deps;
+  if (!resolvedDeps) {
+    stateStore = await createConfiguredStateStore(process.env);
+    try {
+      resolvedDeps = loadAppDependencies(process.env, stateStore);
+    } catch (error) {
+      await stateStore.close();
+      throw error;
+    }
+  } else if (
+    process.env.NODE_ENV === "production" &&
+    resolvedDeps.stateStore instanceof MemoryStateStore
+  ) {
+    throw new Error("Production backend cannot use process-local shared state.");
+  }
+  if (!resolvedDeps) {
+    throw new Error("Backend dependencies were not initialized.");
+  }
+  const app = createApp(resolvedDeps);
+
+  if (resolvedDeps.localDemoMode) {
     logEvent("warn", "local_sepolia_demo_signing_enabled", {
       minimumOutputBaseUnits: "1",
       warning: "This demo minimum is not meaningful slippage protection.",
@@ -446,8 +726,8 @@ export function startServer(
   app.listen(PORT, "0.0.0.0", () => {
     logEvent("info", "backend_started", {
       port: PORT,
-      chainId: deps.chainId,
-      verifier: deps.verifierAddress,
+      chainId: resolvedDeps.chainId,
+      verifier: resolvedDeps.verifierAddress,
     });
   });
 
@@ -455,5 +735,10 @@ export function startServer(
 }
 
 if (isDirectExecution()) {
-  startServer();
+  startServer().catch((error: unknown) => {
+    logEvent("error", "backend_start_failed", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    process.exitCode = 1;
+  });
 }

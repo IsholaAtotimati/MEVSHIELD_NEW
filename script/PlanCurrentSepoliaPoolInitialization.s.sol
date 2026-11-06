@@ -24,12 +24,12 @@ contract PlanCurrentSepoliaPoolInitialization is Script {
 
     uint256 private constant SEPOLIA_CHAIN_ID = 11155111;
     address private constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-    address private constant HOOK = 0xd15E4fDD391a68C2F1C385d1a819117a3aD40080;
+    address private constant HOOK = 0x15D8C5eb1b839A4Fd86989348c1371c10168c080;
     address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address private constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
     uint24 private constant POOL_FEE = 3000;
     int24 private constant TICK_SPACING = 60;
-    bytes32 private constant EXPECTED_POOL_ID = 0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602;
+    bytes32 private constant EXPECTED_POOL_ID = 0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235;
 
     function run() external view {
         require(block.chainid == SEPOLIA_CHAIN_ID, "wrong chain: expected Sepolia");

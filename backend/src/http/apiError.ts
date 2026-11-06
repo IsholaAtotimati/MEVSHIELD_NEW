@@ -13,7 +13,7 @@
 import type { Response } from "express";
 
 /** Statuses the API can return for a failed request. */
-export type ApiErrorStatus = 400 | 404 | 500 | 503;
+export type ApiErrorStatus = 400 | 401 | 404 | 409 | 422 | 429 | 500 | 503;
 
 /**
  * Machine-readable failure reasons. Extend this union rather than passing a
@@ -22,6 +22,13 @@ export type ApiErrorStatus = 400 | 404 | 500 | 503;
 export type ApiErrorCode =
   | "invalid_json"
   | "invalid_request"
+  | "invalid_quote_request"
+  | "quote_unavailable"
+  | "quote_expired_or_mismatched"
+  | "invalid_auth"
+  | "auth_unavailable"
+  | "state_unavailable"
+  | "rate_limited"
   | "invalid_preview"
   | "invalid_pool"
   | "invalid_trader"

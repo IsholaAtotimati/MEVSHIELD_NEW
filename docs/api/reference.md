@@ -1,6 +1,6 @@
 # HTTP API reference
 
-The backend exposes five routes. All are under the same Express app and all accept and return JSON. There is no API version prefix, no API key, and no caller authentication on any route.
+The backend exposes JSON routes under one Express app. There is no API version prefix or API key. Wallet authentication is required for policy signing; public quote, risk, configuration, and observability routes have their separately documented protections.
 
 Base URL: the value of `VITE_API_URL` in the frontend. It defaults to
 `http://localhost:4000` only during Vite development; production builds have no
@@ -14,8 +14,11 @@ Source: [backend/src/server.ts](../../backend/src/server.ts).
 | --- | --- | --- | --- | --- |
 | GET | `/health` | none | 200 | none |
 | GET | `/config/protected-pool` | none | 200 | none |
+| POST | `/auth/nonce` | none; IP limited | 200 | 400, 429, 503 |
+| POST | `/auth/verify` | SIWE signature; IP limited | 200 | 400, 401, 429, 503 |
+| POST | `/quote` | none | 200 | 400, 422, 503 |
 | POST | `/risk-preview` | none | 200 | 400 |
-| POST | `/policy` | none, gated by a 503 feature flag | 200 | 400, 500, 503 |
+| POST | `/policy` | SIWE bearer session; IP and wallet limited; gated by a 503 feature flag | 200 | 400, 401, 409, 429, 500, 503 |
 | POST | `/observability/transaction` | none | 202 | 400 |
 | any | any other path or method | none | none | 404 |
 
@@ -26,7 +29,7 @@ Four behaviours apply to all routes:
 - A malformed JSON body is answered with 400 and `{ "error": "Invalid JSON body", "code": "invalid_json", "requestId": "..." }` before the route handler runs ([backend/src/server.ts:363](../../backend/src/server.ts#L363)).
 - An unknown path or method is answered with 404 and `code: "not_found"` in the same JSON shape, not Express's default HTML page ([backend/src/server.ts:346](../../backend/src/server.ts#L346)).
 - Every error body carries `error`, `code` and `requestId`. See [Error body shape](#error-body-shape).
-- CORS allows one origin, `FRONTEND_URL`, and exposes `x-request-id` ([backend/src/server.ts:86](../../backend/src/server.ts#L86)).
+- CORS allows the comma-separated origins in `FRONTEND_URL` and exposes `x-request-id` ([backend/src/server.ts:86](../../backend/src/server.ts#L86)).
 
 ---
 
@@ -94,9 +97,9 @@ No parameters, no body.
     "currency1": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
     "fee": 3000,
     "tickSpacing": 60,
-    "hooks": "0xd15e4fdd391a68c2f1c385d1a819117a3ad40080"
+    "hooks": "0x15D8C5eb1b839A4Fd86989348c1371c10168c080"
   },
-  "poolId": "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602"
+  "poolId": "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235"
 }
 ```
 
@@ -214,16 +217,20 @@ Source: [backend/src/server.ts:133](../../backend/src/server.ts#L133).
 
 Requests an EIP-712 signature over a fully specified policy.
 
-**This route has no caller authentication.** CORS restricts which browser origins may call it. It does not restrict non-browser clients, and there is no API key, no bearer token, no rate limit and no per-user quota. Any client that can reach the process can obtain a signature from the on-chain authorized signer, subject only to the schema, the pinned pool check, and the pinned trader check.
+**Authentication is required.** Obtain a one-time SIWE message from `POST /auth/nonce`, sign it with the wallet that will trade, and submit it to `POST /auth/verify`. The resulting short-lived bearer session is bound to the configured frontend domain and backend chain ID. `/policy` requires that session and requires the authenticated address to equal `policy.trader`. Authentication nonces are single-use and expire after five minutes; sessions expire after fifteen minutes.
 
-**It is disabled by default.** Signing requires `MEVSHIELD_V2_POLICY_ENABLED=true` or local demo mode. With signing off, the route returns 503 for every request body, including an invalid one, because the gate is evaluated before validation ([backend/src/server.ts:144](../../backend/src/server.ts#L144)). That ordering is intentional: a disabled endpoint should not leak schema diagnostics. `server.test.ts` covers both an empty body and a fully valid body.
+Authentication endpoints and `/policy` have per-socket-IP limits. `/policy` additionally has a per-authenticated-wallet limit. Production counters and authentication/quote state are shared through Redis, including across Railway replicas; Redis operations fail closed. Local development uses in-memory state. The service does not trust forwarded IP headers.
+
+`FRONTEND_URL` must be configured with the exact application origin. The first configured origin is used as the SIWE domain/URI; in production this value is required at startup. Do not configure a path or trailing route as the origin.
+
+**It is disabled by default.** Sepolia signing requires both `MEVSHIELD_V2_POLICY_ENABLED=true` and `MEVSHIELD_V2_DEPLOYMENT_VERIFIED=true`, with all replacement pins matching. Local demo mode is a separate non-production-only path. With signing off, the route returns 503 for every request body, including an invalid one, because the gate is evaluated before validation ([backend/src/server.ts:144](../../backend/src/server.ts#L144)). That ordering is intentional: a disabled endpoint should not leak schema diagnostics. `server.test.ts` covers both an empty body and a fully valid body.
 
 ### Request body
 
 ```json
 {
-  "poolId": "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602",
-  "trader": "0x633282608B2fc66cD7572f5eF58e804063aa150D",
+  "poolId": "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235",
+  "trader": "0x0000000000000000000000000000000000001234",
   "nonce": "1730123456789",
   "expiry": "1730127056",
   "amountSpecified": "-1000000000000000",
@@ -259,17 +266,29 @@ Beyond the schema, the route applies six more rules, in this order:
 | 3 | Outside demo mode, `minAmountOut` must not be `"1"` | 400, `"Invalid minimum output"` |
 | 4 | A signer wallet must be loaded | 503, `"Policy signing is enabled but no signer wallet is configured."` |
 | 5 | `poolId` must equal the configured protected pool id | 400, `"Invalid protected pool"` |
-| 6 | `trader` must equal the configured router address | 400, `"Invalid policy trader"` |
+| 6 | `trader` must be nonzero and equal the authenticated wallet | 400 or 401 |
 
-Rules 5 and 6 are the only content checks that tie the request to the deployment. A caller may still choose `nonce`, `expiry`, `amountSpecified`, `zeroForOne`, `sqrtPriceLimitX96` and, outside demo mode, any positive `minAmountOut`. After those checks the route reads `slot0` and active liquidity and prices `maxLoss` and `maxFee` with `calculateRisk`. It still does not check whether the price limit is on the correct side of the tick, whether it is inside the router's 600-tick cap, or whether `minAmountOut` is achievable.
+The authentication check also binds the submitted trader to the wallet that signed the session. The route validates the live quote identity and expiry before signing, then reads pool state and prices `maxLoss` and `maxFee`.
+
+### Authentication endpoints
+
+`POST /auth/nonce` accepts `{ "address": "0x..." }` and returns a domain-, address-, and chain-bound EIP-4361 message plus nonce expiry. `POST /auth/verify` accepts `{ "message": "...", "signature": "0x..." }`; success returns a bearer token, authenticated address, and ISO expiry. Both endpoints are limited by the connection's socket IP.
+
+Production requires `REDIS_URL`. Nonces, sessions, fixed-window rate-limit counters, and protected quote authorization records are stored in Redis with TTLs. Nonce consumption and rate-limit increments are atomic across instances. Missing/unavailable Redis prevents production startup or makes the affected operation return 503. Local development may omit Redis and uses process-local memory instead.
+
+| Route | Request | Success | Limits |
+| --- | --- | --- | --- |
+| `POST /auth/nonce` | `{ "address": "0x..." }` | `{ "message": "...", "nonce": "...", "expiresAt": 179... }` | 10 requests / 5 minutes / socket IP |
+| `POST /auth/verify` | `{ "message": "...", "signature": "0x..." }` | `{ "token": "...", "address": "0x...", "expiresAt": "..." }` | 10 requests / 5 minutes / socket IP |
+| `POST /policy` | Existing policy body plus `Authorization: Bearer <token>` | Existing signed-policy response | 30 requests / minute / socket IP and 10 / minute / authenticated wallet |
 
 ### Response 200
 
 ```json
 {
   "policy": {
-    "poolId": "0x9275e922143fd87aa42dea59b14fedae2df09098cf62ef0fc60a3799f903b602",
-    "trader": "0x633282608B2fc66cD7572f5eF58e804063aa150D",
+    "poolId": "0xba95e58e09df6620bcf06cf124eb902eba371655696b14ba8b43ec1b9fc22235",
+    "trader": "0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283",
     "nonce": "1730123456789",
     "expiry": "1730127056",
     "maxLoss": "<estimatedLoss * 2>",
@@ -358,7 +377,7 @@ Accepts a client-reported transaction lifecycle event and writes it to the backe
   "event": "swap_submitted",
   "txHash": "0x4a3f...",
   "chainId": 11155111,
-  "router": "0x633282608B2fc66cD7572f5eF58e804063aa150D",
+  "router": "0x78ffC9Fd8cd6312Ac6f4038FBBFF4870d8dC4283",
   "nonce": "1730123456789"
 }
 ```
@@ -458,6 +477,10 @@ Every non-2xx response is built by one helper, `sendApiError`, so the shape is i
 | `invalid_pool` | 400 | `poolId` is not the configured protected pool |
 | `invalid_trader` | 400 | `trader` is not the configured router |
 | `invalid_minimum_output` | 400 | The minimum-output rule for the active mode was violated |
+| `invalid_auth` | 401 | Missing or invalid wallet session, SIWE signature, or authenticated trader |
+| `auth_unavailable` | 503 | Authentication service is temporarily unavailable |
+| `state_unavailable` | 503 | Required shared Redis state is unavailable |
+| `rate_limited` | 429 | Per-IP or per-wallet request limit was exceeded; see `Retry-After` |
 | `not_found` | 404 | No route matched the method and path |
 | `policy_signing_disabled` | 503 | The `POST /policy` feature gate is closed |
 | `signer_unavailable` | 503 | Signing is enabled but no signer wallet was loaded |
@@ -530,7 +553,7 @@ Neither 503 body includes `details`.
 
 ### Errors are not authenticated
 
-A 404 for an unknown path is served before any route logic, and no error body reveals whether an endpoint would have accepted the request. The backend still applies no caller authentication on any route, so an error response should not be read as evidence that the caller was checked. See [Backend service](../services/backend.md#known-limitations).
+A 404 for an unknown path is served before any route logic, and no error body reveals whether an endpoint would have accepted the request. Authentication is enforced on `POST /policy`; it does not imply authentication on the other routes. See [Backend service](../services/backend.md#known-limitations).
 
 ## Related pages
 

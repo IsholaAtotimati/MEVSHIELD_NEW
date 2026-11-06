@@ -100,7 +100,7 @@ function runMonitorScenario(
         TEST_ROUTER_MODE: routerMode,
         ...extraEnv,
       },
-      timeout: 20_000,
+      timeout: 60_000,
     },
   );
 

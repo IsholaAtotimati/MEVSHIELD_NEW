@@ -43,6 +43,7 @@ contract MEVShieldRouter is IUnlockCallback {
     IPoolManager public immutable poolManager;
 
     error Unauthorized();
+    error UnauthorizedTrader();
     error InvalidPayer();
     error InvalidRecipient();
     error InvalidCallback();
@@ -74,7 +75,22 @@ contract MEVShieldRouter is IUnlockCallback {
         bytes calldata hookData,
         address recipient
     ) external payable returns (BalanceDelta delta) {
-        if (recipient == address(0)) revert InvalidRecipient();
+        if (recipient == address(0) || recipient != msg.sender) revert InvalidRecipient();
+
+        // Authenticate the original wallet before entering PoolManager.
+        // The hook sees this router as PoolManager.swap()'s immediate caller.
+        (Policy memory policy,,,) = abi.decode(hookData, (Policy, bytes, uint256, uint256));
+
+        if (policy.trader != msg.sender) revert UnauthorizedTrader();
+
+        // Reject a policy that does not authorize this exact pool and swap.
+        if (
+            policy.poolId != PoolId.unwrap(key.toId()) || policy.zeroForOne != params.zeroForOne
+                || policy.amountSpecified != params.amountSpecified
+                || policy.sqrtPriceLimitX96 != params.sqrtPriceLimitX96 || policy.minAmountOut == 0
+        ) {
+            revert InvalidMinimumOutput();
+        }
 
         bytes memory result = poolManager.unlock(abi.encode(msg.sender, recipient, key, params, hookData, msg.value));
 
@@ -123,27 +139,23 @@ contract MEVShieldRouter is IUnlockCallback {
     /// @dev Reject invalid directional limits and limits farther than the
     ///      configured tick distance before entering PoolManager.swap().
     function _validatePriceLimit(PoolKey memory key, IPoolManager.SwapParams memory params) internal view {
-        (uint160 currentSqrtPriceX96, int24 currentTick,,) =
-            StateLibrary.getSlot0(poolManager, key.toId());
+        (uint160 currentSqrtPriceX96, int24 currentTick,,) = StateLibrary.getSlot0(poolManager, key.toId());
 
-        if (
-            currentSqrtPriceX96 < TickMath.MIN_SQRT_PRICE
-                || currentSqrtPriceX96 >= TickMath.MAX_SQRT_PRICE
-        ) revert InvalidPriceLimit();
+        if (currentSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || currentSqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
+            revert InvalidPriceLimit();
+        }
 
         uint160 limit = params.sqrtPriceLimitX96;
 
         if (
-            limit <= TickMath.MIN_SQRT_PRICE
-                || limit >= TickMath.MAX_SQRT_PRICE
+            limit <= TickMath.MIN_SQRT_PRICE || limit >= TickMath.MAX_SQRT_PRICE
                 || (params.zeroForOne && limit >= currentSqrtPriceX96)
                 || (!params.zeroForOne && limit <= currentSqrtPriceX96)
         ) revert InvalidPriceLimit();
 
         int24 limitTick = TickMath.getTickAtSqrtPrice(limit);
-        int256 distance = params.zeroForOne
-            ? int256(currentTick) - int256(limitTick)
-            : int256(limitTick) - int256(currentTick);
+        int256 distance =
+            params.zeroForOne ? int256(currentTick) - int256(limitTick) : int256(limitTick) - int256(currentTick);
 
         if (distance <= 0) revert InvalidPriceLimit();
         if (uint256(distance) > MAX_PRICE_LIMIT_TICK_DISTANCE) {
