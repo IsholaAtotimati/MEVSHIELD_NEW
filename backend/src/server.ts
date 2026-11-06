@@ -17,6 +17,11 @@ import {
   RISK_MODEL,
   RISK_PREVIEW_DISCLAIMER,
 } from "./risk/riskPreview.js";
+import {
+  quoteWithinActiveTick,
+  QUOTE_MODEL,
+  QUOTE_DISCLAIMER,
+} from "./risk/quote.js";
 import { signProtectedPolicy } from "./policy/policySigning.js";
 import { PolicyRequestSchema } from "./policy/policyRequest.js";
 import { httpLifecycleMiddleware } from "./middleware/httpLifecycle.js";
@@ -185,6 +190,81 @@ export function createApp(deps: AppDependencies): Express {
       }
 
       return res.json(result.data);
+    } catch (error) {
+      if (error instanceof PoolStateUnavailableError) {
+        return sendApiError(res, 503, "pool_state_unavailable", error.message);
+      }
+      return sendApiError(res, 500, "internal_error", "Internal error");
+    }
+  });
+
+  const QuoteRequestSchema = RiskPreviewRequestSchema.extend({}).superRefine(
+    (data, ctx) => {
+      let amount: bigint;
+      try {
+        amount = BigInt(data.amountSpecified);
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          message: "amountSpecified must be a valid integer string",
+          path: ["amountSpecified"],
+        });
+        return;
+      }
+      if (amount >= 0n) {
+        ctx.addIssue({
+          code: "custom",
+          message: "amountSpecified must be negative for an exact-input quote",
+          path: ["amountSpecified"],
+        });
+      }
+    },
+  );
+
+  app.post("/quote", async (req: Request, res: Response) => {
+    const parsed = QuoteRequestSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return sendApiError(res, 400, "invalid_quote", "Invalid quote request", {
+        details: parsed.error.issues,
+      });
+    }
+
+    const amountSpecified = BigInt(parsed.data.amountSpecified);
+
+    try {
+      const pool = await deps.readPoolState();
+      const result = quoteWithinActiveTick({
+        amountIn: -amountSpecified,
+        zeroForOne: parsed.data.zeroForOne,
+        sqrtPriceX96: pool.sqrtPriceX96,
+        liquidity: pool.liquidity,
+        feePips: pool.feePips,
+        tick: pool.tick,
+        tickSpacing: deps.protectedPool.tickSpacing,
+      });
+
+      if (!result.ok) {
+        return sendApiError(
+          res,
+          503,
+          "quote_unavailable",
+          result.error === "no-liquidity"
+            ? "The protected pool has no active liquidity, so no quote is possible."
+            : "The trade does not stay inside the pool's active tick, so the estimate refuses to misprice it.",
+          { reason: result.error },
+        );
+      }
+
+      return res.json({
+        poolId: deps.protectedPool.poolId,
+        amountSpecified: parsed.data.amountSpecified,
+        zeroForOne: parsed.data.zeroForOne,
+        amountOutBaseUnits: result.amountOut.toString(),
+        feePips: pool.feePips.toString(),
+        model: QUOTE_MODEL,
+        disclaimer: QUOTE_DISCLAIMER,
+      });
     } catch (error) {
       if (error instanceof PoolStateUnavailableError) {
         return sendApiError(res, 503, "pool_state_unavailable", error.message);

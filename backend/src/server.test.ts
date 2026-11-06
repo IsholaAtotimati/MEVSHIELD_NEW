@@ -214,6 +214,112 @@ test("POST /risk-preview fails closed when the pool read fails", async () => {
   assert.match(String(response.json.error), /could not be read/);
 });
 
+/** Unit-price pool at tick 0 with deep liquidity: quoteable in both directions. */
+function quoteableReader(): AppDependencies["readPoolState"] {
+  return async () => ({
+    sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+    liquidity: 10n ** 12n,
+    feePips: 3000n,
+    tick: 0,
+  });
+}
+
+/** Live-shaped pool with zero active liquidity: the honest unquotable case. */
+function emptyPoolReader(): AppDependencies["readPoolState"] {
+  return async () => ({
+    sqrtPriceX96: UNIT_SQRT_PRICE_X96,
+    liquidity: 0n,
+    feePips: 3000n,
+    tick: 199_086,
+  });
+}
+
+test("POST /quote returns the active-tick estimate for a deep pool", async () => {
+  const response = await requestJson(createApp(baseDeps({ readPoolState: quoteableReader() })), "POST", "/quote", {
+    amountSpecified: "-1000000",
+    zeroForOne: true,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.poolId, EXPECTED_PROTECTED_POOL.poolId);
+  assert.equal(response.json.amountSpecified, "-1000000");
+  assert.equal(response.json.zeroForOne, true);
+  assert.equal(response.json.amountOutBaseUnits, "996999");
+  assert.equal(response.json.feePips, "3000");
+  assert.equal(response.json.model, "active-tick-estimate");
+  assert.match(String(response.json.disclaimer), /active tick/);
+});
+
+test("POST /quote estimates the one-for-zero direction", async () => {
+  const response = await requestJson(createApp(baseDeps({ readPoolState: quoteableReader() })), "POST", "/quote", {
+    amountSpecified: "-1000000",
+    zeroForOne: false,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.amountOutBaseUnits, "996999");
+});
+
+test("POST /quote rejects a non-negative amountSpecified", async () => {
+  const response = await requestJson(createApp(baseDeps({ readPoolState: quoteableReader() })), "POST", "/quote", {
+    amountSpecified: "1000000",
+    zeroForOne: true,
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.json.code, "invalid_quote");
+});
+
+test("POST /quote rejects a zero amountSpecified", async () => {
+  const response = await requestJson(createApp(baseDeps({ readPoolState: quoteableReader() })), "POST", "/quote", {
+    amountSpecified: "0",
+    zeroForOne: true,
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.json.code, "invalid_quote");
+});
+
+test("POST /quote rejects a malformed amountSpecified", async () => {
+  const response = await requestJson(createApp(baseDeps({ readPoolState: quoteableReader() })), "POST", "/quote", {
+    amountSpecified: "12.5",
+    zeroForOne: true,
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.json.code, "invalid_quote");
+});
+
+test("POST /quote fails closed when the pool read fails", async () => {
+  const response = await requestJson(
+    createApp(
+      baseDeps({
+        readPoolState: async () => {
+          throw new PoolStateUnavailableError("Protected pool slot0 could not be read.");
+        },
+      }),
+    ),
+    "POST",
+    "/quote",
+    { amountSpecified: "-1000000", zeroForOne: true },
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.json.code, "pool_state_unavailable");
+  assert.equal(response.json.amountOutBaseUnits, undefined);
+});
+
+test("POST /quote reports an empty pool as unquotable", async () => {
+  const response = await requestJson(createApp(baseDeps({ readPoolState: emptyPoolReader() })), "POST", "/quote", {
+    amountSpecified: "-1000000",
+    zeroForOne: true,
+  });
+
+  assert.equal(response.status, 503);
+  assert.equal(response.json.code, "quote_unavailable");
+  assert.match(String(response.json.error), /no active liquidity|not quotable|liquidity/i);
+});
+
 test("POST /policy fails closed when the pool read fails and does not sign", async () => {
   const response = await requestJson(
     createApp(

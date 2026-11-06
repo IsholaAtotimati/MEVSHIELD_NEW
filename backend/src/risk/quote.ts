@@ -14,6 +14,10 @@ import { getSqrtPriceAtTick } from "./tickMath.js";
 const Q96 = 1n << 96n;
 export const FEE_DENOMINATOR = 1_000_000n;
 
+export const QUOTE_MODEL = "active-tick-estimate" as const;
+export const QUOTE_DISCLAIMER =
+  "Estimates the swap output from the current pool state while the trade stays inside the active tick. It refuses a larger trade instead of pricing across unverified ticks, and it is not an execution guarantee.";
+
 export type QuoteWithinActiveTickInput = {
   /** Exact input amount, in the input token's base units, before fee. */
   amountIn: bigint;
