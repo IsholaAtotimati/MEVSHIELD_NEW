@@ -50,6 +50,7 @@ type UsePolicyArgs = {
   protectedQuote: ProtectedQuote;
   poolSnapshot: ProtectedPoolSnapshot | null;
   quoteIsFresh: boolean;
+  quoteError: string | null;
   demoEstimateReady: boolean;
   quoteClockMs: number;
   refreshLiveQuote: (
@@ -195,6 +196,7 @@ export function usePolicy(args: UsePolicyArgs) {
       outputToken,
       protectedQuote,
       quoteIsFresh,
+      quoteError,
       demoEstimateReady,
       slippageBps,
       deployment,
@@ -284,6 +286,7 @@ export function usePolicy(args: UsePolicyArgs) {
 
     let registrationTxHash: Hex | undefined;
     let signingQuote = protectedQuote;
+
     try {
       if (
         amountBaseUnits === null ||
@@ -330,6 +333,34 @@ export function usePolicy(args: UsePolicyArgs) {
         );
       }
 
+      const refreshSigningQuote = async (failureMessage: string) => {
+        const refreshedQuote = await refreshLiveQuote(
+          amountBaseUnits,
+          zeroForOne,
+          slippageBps,
+        );
+        if (!refreshedQuote || refreshedQuote.status !== "available") {
+          throw new Error(
+            quoteError ? `Live quote unavailable: ${quoteError}` : failureMessage,
+          );
+        }
+        const refreshedMinimum = calculateMinimumOutput(
+          refreshedQuote.amountOutBaseUnits,
+          slippageBps,
+        );
+        if (
+          refreshedMinimum === null ||
+          refreshedMinimum !== refreshedQuote.minAmountOutBaseUnits
+        ) {
+          throw new Error(
+            "The refreshed quote minimum output does not match the selected slippage.",
+          );
+        }
+        signingQuote = refreshedQuote;
+        sqrtPriceLimitX96 = refreshedQuote.sqrtPriceLimitX96;
+        minAmountOut = refreshedQuote.minAmountOutBaseUnits;
+      };
+
       const walletClient = getWalletClient();
       const [connectedAccount] = await walletClient.requestAddresses();
       if (!connectedAccount) {
@@ -354,22 +385,6 @@ export function usePolicy(args: UsePolicyArgs) {
 
       await ensureSepolia();
 
-      if (
-        !SEPOLIA_DEMO_MODE &&
-        !hasSufficientQuoteWindow(
-          protectedQuote,
-          Date.now(),
-          undefined,
-          amountBaseUnits,
-          poolId,
-          zeroForOne,
-        )
-      ) {
-        throw new Error(
-          "The live quote does not have enough validity remaining. Refresh the quote before approving or signing.",
-        );
-      }
-
       const inputTokenAddress = SWAP_TOKENS[inputToken].address;
       if (inputTokenAddress === null) {
         throw new Error("The selected input token is not configured for this pool.");
@@ -384,6 +399,25 @@ export function usePolicy(args: UsePolicyArgs) {
         throw new Error(
           "Insufficient input-token balance before policy creation.",
         );
+      }
+      if (!SEPOLIA_DEMO_MODE) {
+        await refreshSigningQuote(
+          "A fresh protected quote could not be obtained before token approval. Refresh the quote before creating a policy.",
+        );
+        if (
+          !hasSufficientQuoteWindow(
+            signingQuote,
+            Date.now(),
+            undefined,
+            amountBaseUnits,
+            poolId,
+            zeroForOne,
+          )
+        ) {
+          throw new Error(
+            "The live quote does not have enough validity remaining. Refresh the quote before approving or signing.",
+          );
+        }
       }
       const allowance = await publicClient.readContract({
         address: inputTokenAddress,
@@ -408,53 +442,60 @@ export function usePolicy(args: UsePolicyArgs) {
         if (approvalReceipt.status !== "success") {
           throw new Error("Input-token approval transaction failed.");
         }
-      }
-      if (!SEPOLIA_DEMO_MODE) {
-        const refreshedQuote = await refreshLiveQuote(
-          amountBaseUnits,
-          zeroForOne,
-          slippageBps,
-        );
-        if (!refreshedQuote || refreshedQuote.status !== "available") {
-          throw new Error(
-            "A new protected quote could not be obtained after approval. Refresh the quote before creating a policy.",
+        if (!SEPOLIA_DEMO_MODE) {
+          await refreshSigningQuote(
+            "A fresh protected quote could not be obtained after token approval. Refresh the quote before creating a policy.",
           );
+          if (
+            !hasSufficientQuoteWindow(
+              signingQuote,
+              Date.now(),
+              undefined,
+              amountBaseUnits,
+              poolId,
+              zeroForOne,
+            )
+          ) {
+            throw new Error(
+              "The live quote does not have enough validity after token approval. Refresh the quote before signing.",
+            );
+          }
         }
-        signingQuote = refreshedQuote;
-        sqrtPriceLimitX96 = refreshedQuote.sqrtPriceLimitX96;
-        const refreshedMinimum = calculateMinimumOutput(
-          refreshedQuote.amountOutBaseUnits,
-          slippageBps,
-        );
-        if (
-          refreshedMinimum === null ||
-          refreshedMinimum !== refreshedQuote.minAmountOutBaseUnits
-        ) {
-          throw new Error(
-            "The refreshed quote minimum output does not match the selected slippage.",
-          );
-        }
-        minAmountOut = refreshedQuote.minAmountOutBaseUnits;
-      }
-      if (
-        !SEPOLIA_DEMO_MODE &&
-        !hasSufficientQuoteWindow(
-          signingQuote,
-          Date.now(),
-          undefined,
-          amountBaseUnits,
-          poolId,
-          zeroForOne,
-        )
-      ) {
-        throw new Error(
-          "The quote expired or no longer has enough validity after approval. Refresh the quote before creating a policy.",
-        );
       }
 
       const expiry = buildPolicyExpiry(Date.now() / 1000);
       const nonce = Date.now().toString();
       const authToken = await authenticateWallet(walletClient, connectedAccount);
+      if (!SEPOLIA_DEMO_MODE) {
+        if (
+          !hasSufficientQuoteWindow(
+            signingQuote,
+            Date.now(),
+            undefined,
+            amountBaseUnits,
+            poolId,
+            zeroForOne,
+          )
+        ) {
+          await refreshSigningQuote(
+            "A fresh protected quote could not be obtained after wallet authentication. Refresh the quote before creating a policy.",
+          );
+          if (
+            !hasSufficientQuoteWindow(
+              signingQuote,
+              Date.now(),
+              undefined,
+              amountBaseUnits,
+              poolId,
+              zeroForOne,
+            )
+          ) {
+            throw new Error(
+              "The live quote no longer has enough validity after wallet authentication. Refresh the quote before signing.",
+            );
+          }
+        }
+      }
 
       const response = await fetch(`${BACKEND_URL}/policy`, {
         method: "POST",

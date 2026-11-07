@@ -2,7 +2,7 @@ import type { Address } from "viem";
 
 import type { PolicyResponse } from "./types";
 import type { ProtectedQuote } from "./protectedQuote";
-import { hasSufficientAllowance } from "./allowance";
+import { hasSufficientAllowance } from "./allowance.ts";
 
 type PolicyExecutionReadinessInput = {
   policy: PolicyResponse | null;

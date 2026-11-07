@@ -24,7 +24,19 @@ import {
   apiErrorMessage,
   parseLiveProtectedQuoteBody,
 } from "../lib/apiValidation";
-import { buildLiveQuoteRequest } from "../lib/quoteRequest";
+import {
+  buildLiveQuoteRequest,
+  isInsufficientExecutableLiquidityError,
+  smallerQuoteCandidates,
+} from "../lib/quoteRequest";
+
+type SmallerQuoteSearch = {
+  requestedAmountBaseUnits: bigint;
+  zeroForOne: boolean;
+  slippageBps: number;
+  message: string;
+  suggestedAmountBaseUnits: bigint | null;
+};
 
 export function useProtectedQuote() {
   const [protectedQuote, setProtectedQuote] = useState<ProtectedQuote>({
@@ -38,6 +50,9 @@ export function useProtectedQuote() {
   const [backendConfigError, setBackendConfigError] = useState<string | null>(null);
   const [isRefreshingQuote, setIsRefreshingQuote] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [isFindingSmallerQuote, setIsFindingSmallerQuote] = useState(false);
+  const [smallerQuoteSearch, setSmallerQuoteSearch] =
+    useState<SmallerQuoteSearch | null>(null);
   const quoteRequestSequence = useRef(0);
   const lastUnavailableQuoteKey = useRef<string | null>(null);
 
@@ -228,6 +243,96 @@ export function useProtectedQuote() {
     [],
   );
 
+  const findSmallerQuote = useCallback(
+    async (
+      amountInBaseUnits: bigint,
+      zeroForOne: boolean,
+      slippageBps: number,
+    ): Promise<void> => {
+      setIsFindingSmallerQuote(true);
+      const request = {
+        requestedAmountBaseUnits: amountInBaseUnits,
+        zeroForOne,
+        slippageBps,
+      };
+      setSmallerQuoteSearch({
+        ...request,
+        message: "Checking smaller amounts for an executable quote...",
+        suggestedAmountBaseUnits: null,
+      });
+
+      try {
+        if (SWAP_POOL_ID === null || !BACKEND_URL) {
+          throw new Error("A configured backend and protected pool are required.");
+        }
+
+        const candidates = smallerQuoteCandidates(amountInBaseUnits);
+        for (const candidate of candidates) {
+          const response = await fetch(`${BACKEND_URL}/quote`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+              buildLiveQuoteRequest(candidate, zeroForOne, slippageBps),
+            ),
+          });
+          const body: unknown = await response.json();
+
+          if (response.status === 422) {
+            const message = apiErrorMessage(body, "Live quote failed.");
+            if (isInsufficientExecutableLiquidityError(message)) continue;
+            throw new Error(message);
+          }
+          if (!response.ok) {
+            throw new Error(apiErrorMessage(body, "Smaller quote check failed."));
+          }
+
+          const result = parseLiveProtectedQuoteBody(body);
+          const receivedAtMs = Date.now();
+          if (
+            !result ||
+            result.poolId.toLowerCase() !== SWAP_POOL_ID.toLowerCase() ||
+            result.zeroForOne !== zeroForOne ||
+            result.amountSpecified !== (-candidate).toString() ||
+            result.minAmountOut === "0" ||
+            !Number.isFinite(Date.parse(result.expiresAt)) ||
+            receivedAtMs > Date.parse(result.expiresAt)
+          ) {
+            throw new Error("The smaller quote response failed validation.");
+          }
+
+          setSmallerQuoteSearch({
+            ...request,
+            message:
+              "Found a smaller amount with a valid quote. Review it and apply it explicitly.",
+            suggestedAmountBaseUnits: candidate,
+          });
+          return;
+        }
+
+        setSmallerQuoteSearch({
+          ...request,
+          message:
+            candidates.length === 0
+              ? "No smaller positive amount is available to check."
+              : "No executable quote was found among the smaller amounts checked. The pool may need more liquidity.",
+          suggestedAmountBaseUnits: null,
+        });
+      } catch (error) {
+        setSmallerQuoteSearch({
+          ...request,
+          message:
+            error instanceof Error
+              ? `Could not check smaller amounts: ${error.message}`
+              : "Could not check smaller amounts because of an unknown error.",
+          suggestedAmountBaseUnits: null,
+        });
+      } finally {
+        setIsFindingSmallerQuote(false);
+      }
+    },
+    [],
+  );
+
   const verifyBackendPoolConfiguration = useCallback(async () => {
     if (SWAP_POOL_EXPECTATION === null) {
       setBackendPoolKeyVerified(false);
@@ -292,7 +397,10 @@ export function useProtectedQuote() {
     poolSnapshot,
     setProtectedQuote,
     refreshLiveQuote,
+    findSmallerQuote,
     quoteError,
+    isFindingSmallerQuote,
+    smallerQuoteSearch,
     quoteClockMs,
     setQuoteClockMs,
     nowMs,

@@ -14,21 +14,50 @@ function position(source, fragment) {
   return index;
 }
 
-test("policy lifecycle refreshes the quote after approval and before signing", () => {
+test("policy lifecycle validates a quote before approval and refreshes it before signing", () => {
+  const balanceRead = position(policySource, 'functionName: "balanceOf"');
   const approvalRead = position(policySource, 'functionName: "allowance"');
   const approvalWrite = position(policySource, 'functionName: "approve"');
   const approvalReceipt = position(policySource, "approvalReceipt.status !== \"success\"");
-  const quoteRefresh = position(policySource, "await refreshLiveQuote(");
+  const authentication = position(
+    policySource,
+    "await authenticateWallet(walletClient, connectedAccount)",
+  );
+  const initialQuoteRefresh = position(
+    policySource,
+    "await refreshSigningQuote(",
+  );
+  const postApprovalQuoteRefresh = policySource.indexOf(
+    "await refreshSigningQuote(",
+    initialQuoteRefresh + 1,
+  );
+  const postAuthenticationQuoteRefresh = policySource.indexOf(
+    "await refreshSigningQuote(",
+    postApprovalQuoteRefresh + 1,
+  );
   const policyRequest = position(policySource, 'fetch(`${BACKEND_URL}/policy`');
   const registration = position(policySource, 'functionName: "registerPolicy"');
+  const quoteWindowChecks = [
+    ...policySource.matchAll(/hasSufficientQuoteWindow\(/g),
+  ].map((match) => match.index);
 
+  assert.ok(balanceRead < initialQuoteRefresh);
+  assert.ok(initialQuoteRefresh < quoteWindowChecks[0]);
+  assert.ok(quoteWindowChecks[0] < approvalRead);
   assert.ok(approvalRead < approvalWrite);
   assert.ok(approvalWrite < approvalReceipt);
-  assert.ok(approvalReceipt < quoteRefresh);
-  assert.ok(quoteRefresh < policyRequest);
+  assert.ok(approvalReceipt < postApprovalQuoteRefresh);
+  assert.ok(postApprovalQuoteRefresh < quoteWindowChecks[1]);
+  assert.ok(quoteWindowChecks[1] < authentication);
+  assert.ok(authentication < postAuthenticationQuoteRefresh);
+  assert.ok(postAuthenticationQuoteRefresh < quoteWindowChecks[3]);
+  assert.ok(quoteWindowChecks[3] < policyRequest);
+  assert.ok(policyRequest < quoteWindowChecks[4]);
+  assert.ok(quoteWindowChecks[4] < registration);
   assert.ok(policyRequest < registration);
   assert.match(policySource, /quoteId: signingQuote\.quoteId/);
   assert.match(policySource, /signingQuote = refreshedQuote/);
+  assert.match(policySource, /Live quote unavailable: \$\{quoteError\}/);
 });
 
 test("failed approval and registration stop before later lifecycle steps", () => {
@@ -36,14 +65,17 @@ test("failed approval and registration stop before later lifecycle steps", () =>
     policySource,
     'throw new Error("Input-token approval transaction failed.")',
   );
-  const quoteRefresh = position(policySource, "await refreshLiveQuote(");
+  const authentication = position(
+    policySource,
+    "await authenticateWallet(walletClient, connectedAccount)",
+  );
   const registrationFailure = position(
     policySource,
     'throw new Error("Policy registration transaction failed.")',
   );
   const policyState = position(policySource, "setPolicy({");
 
-  assert.ok(approvalFailure < quoteRefresh);
+  assert.ok(approvalFailure < authentication);
   assert.ok(registrationFailure < policyState);
 });
 

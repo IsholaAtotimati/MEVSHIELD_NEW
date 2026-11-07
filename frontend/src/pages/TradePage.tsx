@@ -164,6 +164,17 @@ export default function TradePage() {
       ? `${(quote.protectedQuote.priceImpactBps / 100).toFixed(2)}% · block ${quote.protectedQuote.blockNumber}`
       : "unavailable";
 
+  const smallerQuoteSearch =
+    quote.smallerQuoteSearch &&
+    quote.smallerQuoteSearch.requestedAmountBaseUnits ===
+      inputAmountBaseUnits &&
+    quote.smallerQuoteSearch.zeroForOne === zeroForOne &&
+    quote.smallerQuoteSearch.slippageBps === slippageBps
+      ? quote.smallerQuoteSearch
+      : null;
+  const smallerQuoteSuggestion =
+    smallerQuoteSearch?.suggestedAmountBaseUnits ?? null;
+
   return (
     <div className="trade-layout">
       <section>
@@ -278,6 +289,69 @@ export default function TradePage() {
         <StatLine label="Gas" mono>
           see top bar (network estimate)
         </StatLine>
+
+        {!DEMO_ESTIMATE_MODE &&
+          inputAmountBaseUnits !== null &&
+          inputAmountBaseUnits > 0n &&
+          zeroForOne !== null &&
+          (quote.quoteError ||
+            smallerQuoteSearch ||
+            smallerQuoteSuggestion !== null) && (
+            <div className="callout-slot" aria-live="polite">
+              <RiskCallout heading="Quote unavailable">
+                {quote.quoteError && <p>{quote.quoteError}</p>}
+                <p>
+                  A smaller amount may fit the pool’s current liquidity. Finding
+                  one will not change your input or authorize a transaction.
+                </p>
+                <Button
+                  variant="ghost"
+                  disabled={quote.isFindingSmallerQuote}
+                  onClick={() =>
+                    void quote.findSmallerQuote(
+                      inputAmountBaseUnits,
+                      zeroForOne,
+                      slippageBps,
+                    )
+                  }
+                >
+                  {quote.isFindingSmallerQuote
+                    ? "Checking smaller amounts..."
+                    : "Find a smaller quoteable amount"}
+                </Button>
+                {smallerQuoteSearch && (
+                  <p role="status">{smallerQuoteSearch.message}</p>
+                )}
+                {smallerQuoteSuggestion !== null && (
+                  <>
+                    <p>
+                      Suggested input:{" "}
+                      <strong>
+                        {formatBaseUnits(
+                          smallerQuoteSuggestion,
+                          SWAP_TOKENS[inputToken].decimals,
+                        )}{" "}
+                        {SWAP_TOKENS[inputToken].poolSymbol}
+                      </strong>
+                    </p>
+                    <Button
+                      variant="primary"
+                      onClick={() =>
+                        onInputAmountChange(
+                          formatBaseUnits(
+                            smallerQuoteSuggestion,
+                            SWAP_TOKENS[inputToken].decimals,
+                          ),
+                        )
+                      }
+                    >
+                      Apply suggested amount
+                    </Button>
+                  </>
+                )}
+              </RiskCallout>
+            </div>
+          )}
 
         {inputToken === "ETH" && (
           <p className="note">

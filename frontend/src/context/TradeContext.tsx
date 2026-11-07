@@ -146,6 +146,7 @@ function useTradeState() {
     protectedQuote: quoteHook.protectedQuote,
     poolSnapshot: quoteHook.poolSnapshot,
     quoteIsFresh,
+    quoteError: quoteHook.quoteError,
     demoEstimateReady,
     quoteClockMs: quoteHook.quoteClockMs,
     refreshLiveQuote: quoteHook.refreshLiveQuote,

@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "tsx --test src/auth/auth.test.ts src/config/runtimeConfig.test.ts src/config/env.test.ts src/policy/eip712.test.ts src/policy/policyRequest.test.ts src/policy/policySigning.test.ts src/risk/riskEngine.test.ts src/risk/poolState.test.ts src/risk/v4Quote.test.ts src/observability/requestCorrelation.test.ts src/risk/riskPreview.test.ts src/monitor/sepolia.test.ts src/server.test.ts",
-    "dev": "tsx src/server.ts",
+    "dev": "env -u ROUTER_ADDRESS -u MEVSHIELD_ROUTER -u HOOK_ADDRESS -u MEVSHIELD_HOOK_ADDRESS -u POLICY_VERIFIER_ADDRESS -u VERIFIER_ADDRESS -u POLICY_VERIFIER -u POLICY_REGISTRY_ADDRESS -u POLICY_REGISTRY -u POLICY_AUTHORIZATION_ADDRESS -u POLICY_AUTHORIZATION tsx src/server.ts",
     "demo": "NODE_ENV=development MEVSHIELD_SEPOLIA_DEMO_ENABLED=true tsx src/server.ts",
     "signer:test": "tsx scripts/testSigner.ts",
     "signer:verify": "tsx scripts/verifyApiSignature.ts",

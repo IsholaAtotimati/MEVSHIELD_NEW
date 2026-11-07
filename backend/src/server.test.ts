@@ -18,6 +18,7 @@ import {
   SharedStateUnavailableError,
   type RateLimitResult,
 } from "./state/stateStore.js";
+import { storeProtectedQuote } from "./risk/v4Quote.js";
 import {
   createApp,
   requireAuthenticationOrigin,
@@ -499,8 +500,32 @@ test("POST /risk-preview fails closed when the pool read fails", async () => {
 });
 
 test("POST /policy fails closed when the pool read fails and does not sign", async () => {
+  const stateStore = new MemoryStateStore();
+  const policyBody = validPolicyBody("100");
+  policyBody.quoteId = `0x${"12".repeat(32)}`;
+  await storeProtectedQuote(
+    {
+      chainId: 11155111,
+      poolId: policyBody.poolId,
+      zeroForOne: policyBody.zeroForOne,
+      amountSpecified: policyBody.amountSpecified,
+      amountOut: "200",
+      minAmountOut: policyBody.minAmountOut,
+      priceImpactBps: 0,
+      sqrtPriceLimitX96: policyBody.sqrtPriceLimitX96,
+      feePips: 3000,
+      blockNumber: 1,
+      blockTimestamp: Math.floor(Date.now() / 1000),
+      quotedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 15_000).toISOString(),
+      quoteId: policyBody.quoteId,
+      poolState: { sqrtPriceX96: "1", tick: 0, liquidity: "10" },
+    },
+    stateStore,
+  );
   const app = createApp(
     v2SigningDeps({
+      stateStore,
       readPoolState: async () => {
         throw new PoolStateUnavailableError(
           "Protected pool slot0 could not be read.",
@@ -512,7 +537,7 @@ test("POST /policy fails closed when the pool read fails and does not sign", asy
     app,
     "POST",
     "/policy",
-    validPolicyBody("100"),
+    policyBody,
     await authenticatedHeaders(app),
   );
 
@@ -522,7 +547,91 @@ test("POST /policy fails closed when the pool read fails and does not sign", asy
 });
 
 test("POST /policy rejects missing or stale live quote references", async () => {
-  const response = await authenticatedPolicyRequest(createApp(v2SigningDeps()), validPolicyBody("100"));
+  let poolRead = false;
+  const response = await authenticatedPolicyRequest(
+    createApp(
+      v2SigningDeps({
+        readPoolState: async () => {
+          poolRead = true;
+          return deepPoolReader()();
+        },
+      }),
+    ),
+    validPolicyBody("100"),
+  );
+  assert.equal(response.status, 409);
+  assert.equal(response.json.code, "quote_expired_or_mismatched");
+  assert.equal(response.json.signature, undefined);
+  assert.equal(poolRead, false);
+});
+
+async function requestWithExpiredQuoteAtRead(expireOnQuoteRead: number) {
+  const stateStore = new MemoryStateStore();
+  const policyBody = validPolicyBody("100");
+  policyBody.quoteId = `0x${"34".repeat(32)}`;
+  const quoteKey = `mevshield:quote:${policyBody.quoteId}`;
+  await storeProtectedQuote(
+    {
+      chainId: 11155111,
+      poolId: policyBody.poolId,
+      zeroForOne: policyBody.zeroForOne,
+      amountSpecified: policyBody.amountSpecified,
+      amountOut: "200",
+      minAmountOut: policyBody.minAmountOut,
+      priceImpactBps: 0,
+      sqrtPriceLimitX96: policyBody.sqrtPriceLimitX96,
+      feePips: 3000,
+      blockNumber: 1,
+      blockTimestamp: Math.floor(Date.now() / 1000),
+      quotedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 15_000).toISOString(),
+      quoteId: policyBody.quoteId,
+      poolState: { sqrtPriceX96: "1", tick: 0, liquidity: "10" },
+    },
+    stateStore,
+  );
+
+  const originalGet = stateStore.get.bind(stateStore);
+  let quoteReadCount = 0;
+  stateStore.get = async (key) => {
+    const value = await originalGet(key);
+    if (key !== quoteKey) return value;
+    quoteReadCount += 1;
+    if (quoteReadCount !== expireOnQuoteRead || value === null) return value;
+    const cached = JSON.parse(value) as { quote: { expiresAt: string } };
+    cached.quote.expiresAt = new Date(Date.now() - 1).toISOString();
+    return JSON.stringify(cached);
+  };
+
+  let poolRead = false;
+  const app = createApp(
+    v2SigningDeps({
+      stateStore,
+      readPoolState: async () => {
+        poolRead = true;
+        return deepPoolReader()();
+      },
+    }),
+  );
+  const response = await authenticatedPolicyRequest(app, policyBody);
+  return { response, poolRead, quoteReadCount };
+}
+
+test("POST /policy rejects a quote that expires during the pool read", async () => {
+  const { response, poolRead, quoteReadCount } =
+    await requestWithExpiredQuoteAtRead(2);
+  assert.equal(poolRead, true);
+  assert.equal(quoteReadCount, 2);
+  assert.equal(response.status, 409);
+  assert.equal(response.json.code, "quote_expired_or_mismatched");
+  assert.equal(response.json.signature, undefined);
+});
+
+test("POST /policy rejects a quote that expires during policy signing", async () => {
+  const { response, poolRead, quoteReadCount } =
+    await requestWithExpiredQuoteAtRead(3);
+  assert.equal(poolRead, true);
+  assert.equal(quoteReadCount, 3);
   assert.equal(response.status, 409);
   assert.equal(response.json.code, "quote_expired_or_mismatched");
   assert.equal(response.json.signature, undefined);

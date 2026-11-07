@@ -499,24 +499,31 @@ export function createApp(deps: AppDependencies): Express {
         zeroForOne: input.zeroForOne,
       });
 
-      const pool = await deps.readPoolState();
-      if (
-        !deps.localDemoMode &&
-        !await isCachedQuoteValidForPolicy({
-          quoteId: input.quoteId ?? "",
-          poolId: input.poolId,
-          amountSpecified: input.amountSpecified,
-          zeroForOne: input.zeroForOne,
-          sqrtPriceLimitX96: input.sqrtPriceLimitX96,
-          minAmountOut: input.minAmountOut,
-        }, deps.stateStore)
-      ) {
-        return sendApiError(
+      const quoteValidationInput = {
+        quoteId: input.quoteId ?? "",
+        poolId: input.poolId,
+        amountSpecified: input.amountSpecified,
+        zeroForOne: input.zeroForOne,
+        sqrtPriceLimitX96: input.sqrtPriceLimitX96,
+        minAmountOut: input.minAmountOut,
+      };
+      const quoteIsValid = () =>
+        isCachedQuoteValidForPolicy(quoteValidationInput, deps.stateStore);
+      const quoteExpiredResponse = () =>
+        sendApiError(
           res,
           409,
           "quote_expired_or_mismatched",
           "A fresh live quote matching the signed swap parameters is required.",
         );
+
+      if (!deps.localDemoMode && !await quoteIsValid()) {
+        return quoteExpiredResponse();
+      }
+
+      const pool = await deps.readPoolState();
+      if (!deps.localDemoMode && !await quoteIsValid()) {
+        return quoteExpiredResponse();
       }
 
       const result = generatePolicy(
@@ -561,6 +568,10 @@ export function createApp(deps: AppDependencies): Express {
         verifierAddress: deps.verifierAddress,
         protectedPool: deps.protectedPool,
       });
+      if (!deps.localDemoMode && !await quoteIsValid()) {
+        return quoteExpiredResponse();
+      }
+
       logEvent("info", "policy_signed", {
         requestId,
         signer: wallet.address,
@@ -736,8 +747,20 @@ export async function startServer(
 
 if (isDirectExecution()) {
   startServer().catch((error: unknown) => {
+    const errorCode =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof error.code === "string"
+        ? error.code
+        : undefined;
     logEvent("error", "backend_start_failed", {
       errorName: error instanceof Error ? error.name : "UnknownError",
+      errorCode,
+      errorMessage:
+        error instanceof Error
+          ? error.message.slice(0, 300)
+          : String(error).slice(0, 300),
     });
     process.exitCode = 1;
   });
