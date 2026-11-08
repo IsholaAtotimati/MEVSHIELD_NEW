@@ -1,7 +1,7 @@
 # Build context for the contracts toolchain image (context is the repo root).
 #
-# Foundry needs src/, script/, test/, foundry.toml and lib/. Everything else is
-# excluded so the context stays small and local secrets never enter a layer.
+# Foundry needs src/, script/, test/, foundry.toml and lib/. The backend is also
+# retained for Railway's Railpack build context; local secrets stay excluded.
 
 # Compiler output and local build state. Rebuilt inside the image.
 out
@@ -26,7 +26,6 @@ node_modules
 
 # Not part of the contracts build.
 frontend
-backend
 docs
 .github
 .vscode
